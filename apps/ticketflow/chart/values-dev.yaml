@@ -1,0 +1,29 @@
+# Development overrides.
+#
+# Consumed by Argo CD as source.helm.valueFiles and by Flux as
+# HelmChart.spec.valuesFiles. Same file, same result, two engines.
+---
+replicaCount: 1
+
+app:
+  environment: dev
+  logLevel: debug
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 96Mi
+  limits:
+    memory: 192Mi
+
+postgres:
+  persistence:
+    # Dev is disposable: no PVC, so `make down` leaves nothing behind and a
+    # rebuild always starts from an empty schema.
+    enabled: false
+  resources:
+    requests:
+      cpu: 25m
+      memory: 96Mi
+    limits:
+      memory: 192Mi

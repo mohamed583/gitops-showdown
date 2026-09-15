@@ -24,14 +24,16 @@ already in it. Right now:
 | ✅ | Two `kind` clusters, identical topology, pinned Kubernetes by digest |
 | ✅ | Argo CD 3.5.3 installed and reaching `Available` |
 | ✅ | Flux 2.9.5 installed and reaching `Available` |
-| ✅ | `make preflight` gates the host tooling; `make lint` gates shell and YAML |
-| ⬜ | **ticketflow** — the application and its Helm chart |
+| ✅ | **ticketflow** — FastAPI + PostgreSQL + Alembic migration, one Helm chart |
+| ✅ | `make smoke` proves the chart end to end with plain Helm, no engine |
+| ✅ | `make preflight` · `make lint` · `make test` gate tooling, YAML, chart and code |
 | ⬜ | The two control planes wired to a shared Git remote (Gitea) |
 | ⬜ | Demo scenarios, architecture diagram, recording |
 
-`make up` today gives you two clusters each running a GitOps engine with nothing
-deployed through it yet. That is the foundation, and it is honest about being
-one.
+`make up` gives you two clusters each running a GitOps engine. The application
+and its chart exist and are verified, but **neither engine is driving them yet** —
+`make smoke` deploys the chart with plain Helm to prove the chart is sound before
+either control plane is wired up. Wiring them up is the next step.
 
 ---
 
@@ -52,6 +54,15 @@ images. kubelet serialises image pulls, and the 215 MB Argo CD image is pulled b
 five separate pods, so the readiness budget is deliberately generous
 (`WAIT_TIMEOUT`, default 900s). Subsequent runs complete in well under a minute
 against a warm cache.
+
+Build and verify the application:
+
+```bash
+make venv           # ticketflow virtualenv with dev extras
+make test           # ruff + pytest
+make build          # build the image, side-load it into both clusters
+make smoke          # install the chart with plain Helm, probe it, remove it
+```
 
 Or one engine at a time:
 
@@ -134,23 +145,28 @@ gitops-showdown/
 ├── infra/kind/
 │   ├── cluster-argocd.yaml       # topology only — image and name come from the Makefile
 │   └── cluster-flux.yaml         # identical, bar one node label
+├── apps/ticketflow/
+│   ├── src/ · tests/ · migrations/   # FastAPI, pytest, Alembic
+│   ├── Dockerfile                    # multi-stage, non-root 65532
+│   └── chart/                        # THE single application definition
+│       └── templates/migration-job.yaml   # the point of divergence
 ├── docs/adr/                     # architecture decision records
 ├── .yamllint.yaml
 └── SECURITY.md
 ```
 
-`apps/`, `platform/` and `.github/workflows/` arrive with the steps below.
+`platform/` and `.github/workflows/` arrive with the steps below.
 
 ---
 
 ## Roadmap
 
 1. ✅ **Foundation** — Makefile, pinned versions, preflight, both clusters, both engines
-2. ⬜ **ticketflow** — a FastAPI support-ticket API, PostgreSQL, and a schema migration Job
+2. ✅ **ticketflow** — FastAPI support-ticket API, PostgreSQL, schema migration Job
 3. ⬜ **Both control planes** driving that chart from a shared local Git remote
 4. ⬜ **Demo scenarios**, architecture diagram, recording
 
-The migration Job in step 2 is the deliberate point of divergence: Flux runs a
+The migration Job is the deliberate point of divergence: Flux runs a
 real `helm upgrade` through helm-controller and leaves a Helm release you can
 `helm rollback`; Argo CD renders the chart with `helm template` and applies it
 with its own hooks and sync waves, leaving no Helm release at all. See
@@ -162,6 +178,7 @@ with its own hooks and sync waves, leaving no Helm release at all. See
 
 - [ADR index](docs/adr/README.md) — decisions, with their rejected alternatives
 - [ADR 001](docs/adr/001-argocd-vs-flux.md) — why this comparison, and how it is kept fair
+- [ADR 002](docs/adr/002-migration-as-helm-hook.md) — the migration hook, and the Helm 4 hazard it surfaced
 - [SECURITY.md](SECURITY.md) — **read before exposing anything**; the bench is deliberately unhardened
 
 ---

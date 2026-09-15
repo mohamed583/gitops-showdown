@@ -1,0 +1,119 @@
+{{- if .Values.migration.enabled }}
+{{/*
+THE POINT OF DIVERGENCE between the two engines.
+
+This Job carries Helm hook annotations and NOTHING ELSE. In particular it
+carries no argocd.argoproj.io/* annotation, deliberately: Argo CD's
+documentation states that "if you define any Argo CD hooks, all Helm hooks will
+be ignored". Adding an Argo CD annotation here would mean the two engines read
+two different manifests, and the bench would be measuring the annotations
+rather than the engines.
+
+Both engines therefore consume the identical annotations, and diverge only in
+how they execute them:
+
+  Flux     helm-controller runs a real `helm upgrade`. The hook is executed by
+           Helm itself, a Helm release exists, `helm history` shows it, and a
+           failed migration can be rolled back with `helm rollback` or by
+           .spec.upgrade.remediation.
+
+  Argo CD  renders the chart with `helm template` and applies the output.
+           `helm.sh/hook: pre-upgrade` is translated to PreSync and
+           `helm.sh/hook-weight` to a sync-wave. No Helm release is created --
+           the Argo CD FAQ notes you "cannot see it with helm ls" -- so
+           rollback goes through `argocd app rollback` over Git history
+           instead.
+
+Note also that Argo CD does NOT support helm.sh/hook: pre-rollback or
+post-rollback; it ignores them. That asymmetry is exactly what this Job exists
+to make visible.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "ticketflow.fullname" . }}-migrate
+  labels:
+    {{- include "ticketflow.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+  annotations:
+    # post-install, NOT pre-install -- and the distinction is not cosmetic.
+    #
+    # Helm runs pre-install hooks before it creates any of the chart's normal
+    # resources. On a first install there is therefore no Postgres Service and
+    # no StatefulSet yet, and a migration hooked on pre-install waits for a
+    # database that does not exist until activeDeadlineSeconds kills it. That
+    # is not a theory: it is what this chart did until the smoke test caught it.
+    #
+    # post-install runs once Postgres exists; pre-upgrade runs before the new
+    # application pods roll, which is exactly when a schema change must land.
+    "helm.sh/hook": post-install,pre-upgrade
+    # Argo CD maps this to sync-wave "-5". It orders the migration against any
+    # other hook in the same phase.
+    "helm.sh/hook-weight": "-5"
+    # Delete the previous Job before creating the new one, so a repeated
+    # upgrade does not collide with an immutable completed Job.
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  activeDeadlineSeconds: {{ .Values.migration.activeDeadlineSeconds }}
+  backoffLimit: {{ .Values.migration.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "ticketflow.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.securityContext.runAsGroup }}
+      initContainers:
+        # Helm's hook ordering guarantees this Job starts before the Deployment
+        # is upgraded, but it guarantees nothing about Postgres being ready --
+        # on a first install the database is coming up at the same time.
+        - name: wait-for-postgres
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h {{ include "ticketflow.databaseHost" . }} -p 5432 -U {{ .Values.postgres.auth.username }}; do
+                echo "waiting for postgres..."
+                sleep 2
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      containers:
+        - name: migrate
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          workingDir: /app
+          command:
+            - sh
+            - -c
+            {{- if .Values.migration.failOnPurpose }}
+            # Demo switch (migration.failOnPurpose=true): fail the migration on
+            # purpose, to compare what each engine leaves behind.
+            - |
+              echo "MIGRATION FAILING ON PURPOSE (migration.failOnPurpose=true)" >&2
+              alembic upgrade head
+              echo "simulated migration failure" >&2
+              exit 1
+            {{- else }}
+            - |
+              alembic upgrade head
+            {{- end }}
+          env:
+            {{- include "ticketflow.env" . | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+{{- end }}

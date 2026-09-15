@@ -30,7 +30,8 @@ Two rules keep these honest:
 | # | Title | Status |
 |---|---|---|
 | [001](001-argocd-vs-flux.md) | Compare Argo CD and Flux on one shared Helm chart | Accepted |
+| [002](002-migration-as-helm-hook.md) | Express the schema migration as a Helm hook, and as nothing else | Accepted |
 
-Records 002–005 (cluster topology, the migration Job as the divergence point,
-the local Git server, secrets management) are written as the corresponding code
-lands. This index lists only what exists.
+Further records (cluster topology, the local Git server, secrets management)
+are written as the corresponding code lands. This index lists only what
+exists; records are numbered in the order decisions are made.

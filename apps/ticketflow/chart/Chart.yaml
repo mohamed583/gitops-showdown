@@ -1,0 +1,24 @@
+apiVersion: v2
+name: ticketflow
+description: |
+  Support-ticket API with PostgreSQL and a schema migration hook.
+  The single application definition of gitops-showdown, consumed unchanged by
+  both Argo CD and Flux.
+type: application
+
+# version  -- the chart's own version, bumped when templates change.
+# appVersion -- the ticketflow release, surfaced by GET /version so the demo can
+#               show which revision each engine has converged to.
+version: 0.1.0
+appVersion: "0.1.0"
+
+kubeVersion: ">=1.33.0-0"
+
+maintainers:
+  - name: gitops-showdown
+
+annotations:
+  # No dependencies on purpose: Argo CD's repo-server and Flux's source-controller
+  # resolve chart dependencies through different machinery, and that difference
+  # would show up in the bench as if it were a property of the engines.
+  showdown.io/dependencies: "none -- see ADR 001"

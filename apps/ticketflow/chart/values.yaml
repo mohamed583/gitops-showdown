@@ -1,0 +1,89 @@
+# Default values for ticketflow.
+#
+# These defaults are consumed identically by Argo CD (source.helm.valueFiles)
+# and by Flux (HelmChart.spec.valuesFiles). Per-environment overrides live
+# beside this file as values-<env>.yaml -- never duplicated per engine.
+---
+replicaCount: 1
+
+image:
+  repository: ticketflow
+  tag: "0.1.0"
+  # The image is built locally and side-loaded into both clusters with
+  # `kind load docker-image`, so there is no registry to pull from. Never
+  # change this to Always without also providing a registry.
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8000
+
+# Surfaced by GET /version. `release` is overridden from .Chart.AppVersion by
+# the template; `environment` is what each values-<env>.yaml sets.
+app:
+  environment: default
+  logLevel: info
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 256Mi
+
+# Matches the numeric USER in the Dockerfile. Asserted here so a rebuilt image
+# that drops back to root fails to schedule instead of quietly running as root.
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+postgres:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "18-alpine"
+    pullPolicy: IfNotPresent
+  auth:
+    database: ticketflow
+    username: ticketflow
+    # Lab credential. This is not a secret: the cluster is disposable, it is
+    # never exposed beyond localhost, and SECURITY.md says so explicitly.
+    # Override it, or supply an existing Secret, for anything else.
+    password: ticketflow
+  existingSecret: ""
+  persistence:
+    enabled: true
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+# The schema migration -- the deliberate point of divergence between the two
+# engines. See docs/adr/001-argocd-vs-flux.md.
+migration:
+  enabled: true
+  # Seconds the Job may run before Kubernetes gives up on it.
+  activeDeadlineSeconds: 300
+  backoffLimit: 2
+  # Set true to make `alembic upgrade head` fail on purpose. This is the demo
+  # switch: it shows what each engine does with a migration that does not
+  # complete -- Flux leaves a failed Helm release it can roll back, Argo CD
+  # leaves a failed PreSync hook and no Helm release at all.
+  failOnPurpose: false
+
+probes:
+  liveness:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  readiness:
+    initialDelaySeconds: 3
+    periodSeconds: 5

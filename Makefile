@@ -23,12 +23,14 @@ KF := kubectl --context $(CTX_FLUX)
 # reaches the other listener. 9443 is far less contended and still reads as TLS.
 ARGOCD_UI_PORT ?= 9443
 
+CHART_DIR := $(ROOT_DIR)/apps/ticketflow/chart
+
 # A first `make up` pulls ~1.5 GB of controller images, and kubelet serialises
 # image pulls: the Argo CD image alone is 215 MB and is pulled by five pods.
 # 300s is comfortably too short on a cold cache. Override for a warm one.
 WAIT_TIMEOUT ?= 900s
 
-.PHONY: help versions preflight lint \
+.PHONY: help versions preflight lint build test venv template smoke \
         up up-argocd up-flux down down-argocd down-flux \
         status ui-argocd ui-flux
 
@@ -157,17 +159,102 @@ down-argocd: ## Delete the Argo CD cluster
 down-flux: ## Delete the Flux cluster
 	@kind delete cluster --name $(CLUSTER_FLUX)
 
+##@ Application
+
+build: ## Build the ticketflow image and side-load it into both clusters
+	@echo "==> building $(TICKETFLOW_IMAGE):$(TICKETFLOW_VERSION)"
+	@docker build \
+	  --build-arg PYTHON_IMAGE=$(PYTHON_IMAGE) \
+	  -t $(TICKETFLOW_IMAGE):$(TICKETFLOW_VERSION) \
+	  $(ROOT_DIR)/apps/ticketflow
+	@# There is no registry: the image is side-loaded into each cluster's
+	@# containerd. The chart therefore pins imagePullPolicy: IfNotPresent.
+	@for c in $(CLUSTER_ARGOCD) $(CLUSTER_FLUX); do \
+	   if kind get clusters 2>/dev/null | grep -qx "$$c"; then \
+	     echo "==> loading image into $$c"; \
+	     kind load docker-image $(TICKETFLOW_IMAGE):$(TICKETFLOW_VERSION) --name "$$c"; \
+	   else \
+	     echo "==> skipping $$c (cluster does not exist)"; \
+	   fi; \
+	 done
+
+test: ## Run the ticketflow unit tests and ruff
+	@cd $(ROOT_DIR)/apps/ticketflow && \
+	  if [ ! -x .venv/bin/python ] && [ ! -x .venv/Scripts/python.exe ]; then \
+	    echo "no venv -- run: make venv"; exit 1; fi; \
+	  PY=$$( [ -x .venv/bin/python ] && echo .venv/bin/python || echo .venv/Scripts/python.exe ); \
+	  echo "==> ruff"   && $$PY -m ruff check . && \
+	  echo "==> pytest" && $$PY -m pytest -q
+
+venv: ## Create the ticketflow virtualenv and install it with dev extras
+	@cd $(ROOT_DIR)/apps/ticketflow && \
+	  python -m venv .venv 2>/dev/null || py -3.13 -m venv .venv; \
+	  PY=$$( [ -x .venv/bin/python ] && echo .venv/bin/python || echo .venv/Scripts/python.exe ); \
+	  $$PY -m pip install -q --upgrade pip && $$PY -m pip install -q -e ".[dev]" && \
+	  echo "==> venv ready"
+
+template: ## Render the chart for every environment, exactly as the engines do
+	@for env in dev staging; do \
+	  echo "==> helm template -f values-$$env.yaml"; \
+	  helm template ticketflow $(CHART_DIR) \
+	    --values $(CHART_DIR)/values.yaml \
+	    --values $(CHART_DIR)/values-$$env.yaml \
+	    --namespace ticketflow > /dev/null; \
+	done
+	@echo "==> all environments render"
+
+smoke: ## Install the chart with plain Helm and prove it works, then remove it
+	@# Deliberately uses Helm directly, no GitOps engine. It answers one
+	@# question -- is the chart itself sound? -- before either engine is wired
+	@# up, so a session-3 failure cannot be blamed on the chart.
+	@#
+	@# --wait=legacy is not decoration. Helm 4 turned --wait into a strategy
+	@# (watcher | hookOnly | legacy) and the default 'watcher' never observes
+	@# this hook Job completing: the Job reaches Complete in seconds while
+	@# Helm waits until timeout. 'legacy' returns in under 20 seconds.
+	@set -e; \
+	 ctx=kind-$(CLUSTER_ARGOCD); ns=ticketflow-smoke; \
+	 trap 'helm uninstall smoke --kube-context '"$$"'ctx -n '"$$"'ns >/dev/null 2>&1 || true; \
+	       kubectl --context '"$$"'ctx delete namespace '"$$"'ns --wait=false >/dev/null 2>&1 || true' EXIT; \
+	 echo "==> installing the chart with helm (no engine involved)"; \
+	 helm install smoke $(CHART_DIR) --kube-context $$ctx \
+	   --namespace $$ns --create-namespace \
+	   --values $(CHART_DIR)/values.yaml --values $(CHART_DIR)/values-dev.yaml \
+	   --wait=legacy --wait-for-jobs --timeout 6m >/dev/null; \
+	 echo "==> migration job log"; \
+	 kubectl --context $$ctx -n $$ns logs job/smoke-ticketflow-migrate -c migrate | sed 's/^/    /'; \
+	 echo "==> probing the API through its Service, from inside the cluster"; \
+	 pod=$$(kubectl --context $$ctx -n $$ns get pod -l app.kubernetes.io/component=api \
+	        -o jsonpath='{.items[0].metadata.name}'); \
+	 kubectl --context $$ctx -n $$ns exec -i $$pod -- python - http://smoke-ticketflow:8000 \
+	   < $(ROOT_DIR)/hack/smoke-probe.py; \
+	 echo "==> chart verified end to end"
+
 ##@ Quality
 
-lint: ## Lint shell scripts and YAML (skips loudly when a linter is absent)
+lint: ## Lint shell scripts, YAML and the Helm chart
 	@if command -v shellcheck >/dev/null 2>&1; then \
 	   echo "==> shellcheck"; \
 	   find $(ROOT_DIR)/hack -maxdepth 1 -name '*.sh' -exec shellcheck {} + ; \
 	 else echo "==> shellcheck  SKIPPED (not installed -- enforced in CI)"; fi
 	@if command -v yamllint >/dev/null 2>&1; then \
 	   echo "==> yamllint"; \
-	   for d in infra platform apps .github; do \
+	   for d in infra platform .github; do \
 	     if [ -d "$(ROOT_DIR)/$$d" ]; then yamllint -c $(ROOT_DIR)/.yamllint.yaml "$(ROOT_DIR)/$$d"; fi; \
 	   done; \
 	 else echo "==> yamllint    SKIPPED (not installed -- enforced in CI)"; fi
+	@# The chart is linted against every values file it ships, not just the
+	@# defaults: an override that breaks a template must fail here, not in a
+	@# cluster three minutes later.
+	@if command -v helm >/dev/null 2>&1 && [ -d "$(CHART_DIR)" ]; then \
+	   echo "==> helm lint"; \
+	   for env in "" dev staging; do \
+	     if [ -z "$$env" ]; then \
+	       helm lint $(CHART_DIR) --values $(CHART_DIR)/values.yaml; \
+	     else \
+	       helm lint $(CHART_DIR) --values $(CHART_DIR)/values.yaml \
+	                              --values $(CHART_DIR)/values-$$env.yaml; \
+	     fi; \
+	   done; \
+	 else echo "==> helm lint    SKIPPED (helm not installed)"; fi
 	@echo "==> lint clean"

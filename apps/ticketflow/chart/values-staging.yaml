@@ -1,0 +1,34 @@
+# Staging overrides.
+#
+# Closer to a real deployment than dev: two replicas, a persistent volume, and
+# tighter probe timings. Still a lab -- see SECURITY.md.
+---
+replicaCount: 2
+
+app:
+  environment: staging
+  logLevel: info
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 192Mi
+  limits:
+    memory: 384Mi
+
+postgres:
+  persistence:
+    enabled: true
+    size: 2Gi
+
+migration:
+  # Staging keeps a wider window: a migration against a populated schema takes
+  # longer than against an empty one, and a Job killed mid-migration is the
+  # worst of both worlds.
+  activeDeadlineSeconds: 600
+  backoffLimit: 1
+
+probes:
+  readiness:
+    initialDelaySeconds: 5
+    periodSeconds: 5

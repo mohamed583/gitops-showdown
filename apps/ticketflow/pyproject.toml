@@ -1,0 +1,55 @@
+[project]
+name = "ticketflow"
+version = "0.1.0"
+description = "Minimal support-ticket API -- the payload of the gitops-showdown bench"
+requires-python = ">=3.13"
+
+# Pinned exactly, and verified against PyPI on 2026-09-15. The bench compares
+# two GitOps engines; a dependency drifting under it would be noise in the
+# measurement.
+dependencies = [
+    "fastapi==0.141.1",
+    "uvicorn[standard]==0.53.0",
+    "sqlalchemy==2.0.54",
+    "psycopg[binary]==3.3.5",
+    "alembic==1.20.0",
+    "pydantic==2.13.5",
+    "pydantic-settings==2.15.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "httpx==0.28.1",
+    "ruff==0.16.7",
+]
+
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff.lint.flake8-bugbear]
+# `Depends(...)` as a parameter default is FastAPI's documented idiom, not the
+# mutable-default bug B008 exists to catch. Whitelisting the specific callables
+# keeps B008 active everywhere else.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Header",
+    "fastapi.Body",
+]
