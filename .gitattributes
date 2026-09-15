@@ -1,0 +1,17 @@
+# Line endings are not cosmetic here.
+#
+# hack/preflight.sh is executed by `/usr/bin/env bash`; checked out with CRLF
+# it fails with "bad interpreter: no such file or directory", and GNU Make
+# recipes break the same way. This repository is cloned on Windows, so the
+# conversion must be pinned rather than left to the local core.autocrlf.
+* text=auto eol=lf
+
+*.sh        text eol=lf
+*.env       text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+Makefile    text eol=lf
+
+*.png       binary
+*.gif       binary
+*.svg       text eol=lf

@@ -1,0 +1,17 @@
+# .yamllint.yaml -- YAML lint policy for gitops-showdown.
+#
+# Kubernetes manifests are not prose: 80 columns is not a useful limit for an
+# image digest or a long annotation key, and `on:` in a GitHub workflow is a
+# keyword, not a boolean. Everything else stays at yamllint's defaults.
+---
+extends: default
+
+rules:
+  line-length:
+    max: 120
+    level: warning
+  # `on:` in .github/workflows is a key, not the boolean "on".
+  truthy:
+    check-keys: false
+  comments:
+    min-spaces-from-content: 1

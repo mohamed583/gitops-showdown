@@ -1,0 +1,23 @@
+# infra/kind/cluster-flux.yaml -- substrate for the Flux control plane.
+#
+# This file describes TOPOLOGY ONLY. Two things are deliberately absent:
+#
+#   * the node image -- passed by the Makefile as
+#     `kind create cluster --image $(KIND_NODE_IMAGE)`, so the pinned digest
+#     is spelled exactly once in the whole repository, in hack/versions.env;
+#   * the cluster name -- passed as `--name $(CLUSTER_FLUX)`, same reason.
+#
+# This topology is IDENTICAL to infra/kind/cluster-argocd.yaml except for the
+# node label below. That is the point: neither engine may be advantaged by
+# the substrate it runs on, or the comparison measures the lab, not the tool.
+---
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+
+# One control-plane node, no workers. The Flux controllers and the future
+# ticketflow workload fit comfortably; a worker node would cost ~1 GB of RAM
+# for nothing on a single-machine lab.
+nodes:
+  - role: control-plane
+    labels:
+      showdown.io/engine: flux
