@@ -1,0 +1,66 @@
+# Static checks. Fast, runs on every push and pull request.
+#
+# The linters are installed here rather than assumed, because `make lint` skips
+# loudly when one is missing -- convenient locally, useless as a gate. CI is
+# where "skipped" must be impossible.
+---
+name: lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read pinned versions
+        # hack/versions.env is the single source of truth. CI reads it rather
+        # than repeating any version, so a bump in one file moves everything.
+        # Only KEY=value lines: $GITHUB_ENV rejects comments and blanks outright.
+        run: grep -E "^[A-Z][A-Z0-9_]*=" hack/versions.env >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Install linters
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          python -m pip install --quiet yamllint
+          curl -fsSL "https://get.helm.sh/helm-v${HELM_CI_VERSION}-linux-amd64.tar.gz" \
+            | tar -xz -C /tmp linux-amd64/helm
+          sudo install /tmp/linux-amd64/helm /usr/local/bin/helm
+          helm version --short
+        env:
+          # Match what the engines themselves run, not whatever is newest.
+          HELM_CI_VERSION: 4.2.1
+
+      - name: Install ticketflow with dev extras
+        run: make venv
+
+      - name: make lint
+        run: make lint
+
+      - name: make test
+        run: make test
+
+      - name: make template
+        # Rendering every environment catches a values file that breaks a
+        # template, which `helm lint` on defaults alone does not.
+        run: make template
+
+      - name: Every linter actually ran
+        # `make lint` is written to skip a missing linter loudly rather than
+        # fail. That is right locally and wrong here, so assert the tools exist.
+        run: |
+          for tool in shellcheck yamllint helm; do
+            command -v "$tool" >/dev/null || { echo "$tool missing in CI"; exit 1; }
+          done

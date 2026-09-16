@@ -1,0 +1,95 @@
+# End-to-end: does the bench actually come up?
+#
+# This is the expensive one, so it does not run on every push. It builds one
+# kind cluster per engine, installs the engine, builds and side-loads the
+# application image, and proves the chart works with `make smoke`.
+#
+# It deliberately stops short of the full `make up`: that also starts Gitea and
+# bootstraps both engines from it, which needs the CoreDNS rewrite and roughly
+# twenty minutes. The parts it does run are the ones that have actually broken
+# before -- see docs/runbook.md.
+---
+name: e2e
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'apps/**'
+      - 'infra/**'
+      - 'platform/**'
+      - 'hack/**'
+      - 'Makefile'
+      - '.github/workflows/e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two of these at once on the same runner class is a waste; the later one wins.
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read pinned versions
+        # Only KEY=value lines: $GITHUB_ENV rejects comments and blanks outright.
+        run: grep -E "^[A-Z][A-Z0-9_]*=" hack/versions.env >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Install kind and helm at the pinned versions
+        run: |
+          curl -fsSLo /tmp/kind \
+            "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          sudo install /tmp/kind /usr/local/bin/kind
+          curl -fsSL "https://get.helm.sh/helm-v4.2.1-linux-amd64.tar.gz" \
+            | tar -xz -C /tmp linux-amd64/helm
+          sudo install /tmp/linux-amd64/helm /usr/local/bin/helm
+          kind version
+          helm version --short
+
+      - name: make preflight
+        run: make preflight
+
+      - name: Bring up both clusters and both engines
+        # WAIT_TIMEOUT matters here more than locally: a GitHub runner pulls
+        # ~1.5 GB of controller images cold, every time.
+        run: make up-clusters WAIT_TIMEOUT=1200s
+
+      - name: Build and side-load the application image
+        run: make build
+
+      - name: Prove the chart works, with plain Helm and no engine
+        run: make smoke
+
+      - name: Both control planes are healthy
+        run: |
+          kubectl --context kind-"${CLUSTER_ARGOCD}" -n "${ARGOCD_NAMESPACE}" \
+            get deployment,statefulset
+          kubectl --context kind-"${CLUSTER_FLUX}" -n "${FLUX_NAMESPACE}" \
+            get deployment
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          for cluster in "${CLUSTER_ARGOCD}" "${CLUSTER_FLUX}"; do
+            echo "::group::${cluster}"
+            kubectl --context "kind-${cluster}" get pods -A || true
+            kubectl --context "kind-${cluster}" get events -A \
+              --sort-by=.lastTimestamp | tail -40 || true
+            echo "::endgroup::"
+          done
+
+      - name: Tear down
+        if: always()
+        run: make down

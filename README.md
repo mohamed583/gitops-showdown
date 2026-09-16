@@ -1,7 +1,13 @@
 # gitops-showdown
 
+[![lint](https://github.com/OWNER/gitops-showdown/actions/workflows/lint.yml/badge.svg)](https://github.com/OWNER/gitops-showdown/actions/workflows/lint.yml)
+[![licence](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](LICENSE)
+
 **The same application, deployed by Argo CD and by FluxCD, from one identical
 Helm chart — with the trade-offs written down.**
+
+<!-- Replace OWNER above with your GitHub account once this is pushed; the
+     badge cannot resolve until the workflow has run at least once. -->
 
 This is a comparison bench, not a tutorial. Both engines consume the same chart
 on identically-configured clusters, so neither is advantaged by the setup and a
