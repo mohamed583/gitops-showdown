@@ -126,6 +126,7 @@ def run(command: str, shell: str) -> str:
         capture_output=True,
         text=True,
         timeout=300,
+        check=False,  # a non-zero exit is still output worth recording
     )
     out = (result.stdout or "") + (result.stderr or "")
     if not out.strip():
@@ -207,7 +208,7 @@ def main() -> int:
     result = subprocess.run(
         ["agg", "--font-size", "15", "--theme", "asciinema",
          "--speed", "1.0", str(cast_path), str(gif_path)],
-        capture_output=True, text=True,
+        capture_output=True, text=True, check=False,
     )
     if result.returncode != 0:
         print(result.stdout + result.stderr, file=sys.stderr)

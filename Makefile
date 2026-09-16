@@ -342,4 +342,13 @@ lint: ## Lint shell scripts, YAML and the Helm chart
 	     fi; \
 	   done; \
 	 else echo "==> helm lint    SKIPPED (helm not installed)"; fi
+	@# hack/ holds Python as well as shell -- record-demo.py and smoke-probe.py
+	@# were unlinted until this line existed.
+	@if [ -x $(ROOT_DIR)/apps/ticketflow/.venv/Scripts/python.exe ] || [ -x $(ROOT_DIR)/apps/ticketflow/.venv/bin/python ]; then \
+	   echo "==> ruff (hack)"; \
+	   PY=$$( [ -x $(ROOT_DIR)/apps/ticketflow/.venv/bin/python ] \
+	          && echo $(ROOT_DIR)/apps/ticketflow/.venv/bin/python \
+	          || echo $(ROOT_DIR)/apps/ticketflow/.venv/Scripts/python.exe ); \
+	   $$PY -m ruff check $(ROOT_DIR)/hack; \
+	 else echo "==> ruff (hack)  SKIPPED (no venv -- run: make venv)"; fi
 	@echo "==> lint clean"
