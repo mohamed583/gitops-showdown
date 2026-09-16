@@ -7,10 +7,7 @@ This is a comparison bench, not a tutorial. Both engines consume the same chart
 on identically-configured clusters, so neither is advantaged by the setup and a
 difference you observe is a difference in the engine.
 
-<!-- Reserved for the demo recording — see "Roadmap" below. Nothing is recorded
-     yet; this placeholder exists so the asset has a home, not to imply a demo. -->
-> **Demo recording:** not recorded yet. Lands with the demo scenarios (roadmap
-> step 4), at `docs/assets/showdown.gif`.
+![architecture](docs/architecture.svg)
 
 ---
 
@@ -29,11 +26,11 @@ already in it. Right now:
 | ✅ | `make preflight` · `make lint` · `make test` gate tooling, YAML, chart and code |
 | ✅ | **Both engines reconciling the same chart from one local Gitea remote** |
 | ✅ | `make diverge` shows the difference from the live clusters |
-| ⬜ | Demo scenarios, architecture diagram, recording |
+| ✅ | Demo scenarios, architecture diagram, comparison table, runbook |
 
-Both engines now deploy ticketflow from the same commit of the same repository.
-What remains is the presentation layer: scripted demo scenarios, an architecture
-diagram, and a recording.
+Both engines deploy ticketflow from the same commit of the same repository, and
+the trade-offs between them are written down and sourced in
+[docs/comparison.md](docs/comparison.md).
 
 ---
 
@@ -64,12 +61,17 @@ make build          # build the image, side-load it into both clusters
 make smoke          # install the chart with plain Helm, probe it, remove it
 ```
 
-Wire both engines to a shared Git remote and watch them converge:
+`make up` does all of it: two clusters, both engines, the image built and
+side-loaded, a local Gitea on the kind network, and both engines bootstrapped
+against it. The order matters — there is no registry, so bootstrapping before
+the image is loaded gives you `ImagePullBackOff`.
+
+Then watch them work:
 
 ```bash
-make git-server     # local Gitea on the kind network, repo pushed to it
-make bootstrap      # point both engines at it; they pull everything else
-make diverge        # the punchline, read from the live clusters
+make diverge                    # the punchline, read from the live clusters
+hack/demo-converge.sh           # commit one change, time both engines
+hack/demo-failed-migration.sh break    # break the migration, compare the wreckage
 ```
 
 Or one engine at a time:
@@ -100,7 +102,14 @@ Same chart, same commit, same application, deployed by both engines:
 | Helm release storage Secrets | 0 | 1 |
 | Undo path | `argocd app rollback`, over Git history | `helm rollback`, over Helm history |
 
-And one difference that is not a matter of taste: a migration Job annotated
+Two differences that are not matters of taste. First: a Flux `HelmRelease`
+pointed at a chart living in the same repository **silently ignores your
+commits** until you set `reconcileStrategy: Revision` — the default only rebuilds
+when `Chart.yaml`'s `version` changes. Measured here: same commit on both
+engines, Argo CD serving the new release, Flux still serving the old one twelve
+minutes later.
+
+Second: a migration Job annotated
 `helm.sh/hook: pre-upgrade` installs cleanly under Flux and **deadlocks Argo CD's
 first sync**, because Argo CD maps `pre-upgrade` to `PreSync` and runs it before
 the database it depends on has been created. [ADR 002](docs/adr/002-migration-as-helm-hook.md)
@@ -194,7 +203,7 @@ gitops-showdown/
 1. ✅ **Foundation** — Makefile, pinned versions, preflight, both clusters, both engines
 2. ✅ **ticketflow** — FastAPI support-ticket API, PostgreSQL, schema migration Job
 3. ✅ **Both control planes** driving that chart from a shared local Git remote
-4. ⬜ **Demo scenarios**, architecture diagram, recording
+4. ✅ **Demo scenarios**, architecture diagram, comparison table, runbook
 
 The migration Job is the deliberate point of divergence: Flux runs a
 real `helm upgrade` through helm-controller and leaves a Helm release you can
@@ -206,6 +215,8 @@ with its own hooks and sync waves, leaving no Helm release at all. See
 
 ## Documentation
 
+- **[docs/comparison.md](docs/comparison.md)** — the factual table: every row measured here or sourced upstream, and what the bench deliberately does not test
+- [docs/runbook.md](docs/runbook.md) — symptom → diagnosis → fix; every entry is a failure that actually happened while building this
 - [ADR index](docs/adr/README.md) — decisions, with their rejected alternatives
 - [ADR 001](docs/adr/001-argocd-vs-flux.md) — why this comparison, and how it is kept fair
 - [ADR 002](docs/adr/002-migration-as-helm-hook.md) — the migration hook, and why Argo CD forced its phase to change

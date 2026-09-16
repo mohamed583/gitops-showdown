@@ -122,7 +122,18 @@ cat <<NEXT
 
   ${GREEN}Both engines converged on ${sha} from the same commit.${RESET}
 
-  What differs is not the outcome but the machinery underneath:
+  ${BOLD}Read those numbers carefully.${RESET} They measure the POLLING INTERVALS
+  this bench happens to configure, not any inherent speed difference:
+
+    Flux      GitRepository and Kustomization interval: 1m (set in platform/flux)
+    Argo CD   default repo polling: 3m (timeout.reconciliation, unchanged here)
+
+  Both engines support webhooks, which make the poll interval irrelevant.
+  Neither is "faster" than the other in any sense this demo can establish --
+  what it shows is that the same commit reaches both, on the cadence each was
+  told to use.
+
+  What genuinely differs is the machinery underneath:
     ${DIM}make diverge${RESET}   Flux left a Helm release; Argo CD did not.
 
   To undo, commit the reverse -- that is what GitOps means here:

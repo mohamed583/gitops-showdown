@@ -27,6 +27,19 @@ spec:
         - apps/ticketflow/chart/values.yaml
         - apps/ticketflow/chart/values-dev.yaml
       interval: 1m
+      # Without this, Flux does NOT upgrade when you commit a change.
+      #
+      # The default is ChartVersion: a new chart artifact is built only when
+      # Chart.yaml's `version` changes. In a monorepo where the chart lives
+      # beside the application, that is almost never what you want -- commit a
+      # template change, a values change, or an appVersion bump, and Flux sees
+      # the new Git revision, rebuilds nothing, and leaves the release alone.
+      #
+      # Measured on this bench: after a commit bumping appVersion 0.1.0 -> 0.1.1,
+      # Argo CD had rolled the new pod while Flux still served 0.1.0, with both
+      # engines reporting the same commit. Revision rebuilds on every source
+      # revision, which is what a co-located chart needs.
+      reconcileStrategy: Revision
   install:
     remediation:
       retries: 2

@@ -70,7 +70,56 @@ Reproduce it: set `migration.hook=post-install,pre-upgrade`, commit, push.
 
 Full account in [ADR 002](adr/002-migration-as-helm-hook.md).
 
-## 4. Values files
+## 4. What counts as "a change worth acting on"
+
+*Measured, and the sharpest practical surprise after the hook phase.*
+
+Commit a change that does not touch `Chart.yaml`'s `version` field — a template
+edit, a values edit, an `appVersion` bump — and the two engines do not agree
+that anything happened:
+
+| | Argo CD 3.5.3 | Flux 2.9.5, default |
+|---|---|---|
+| Re-renders on every commit | yes | **no** |
+| What triggers an upgrade | any change to the rendered manifests | a change to the chart's `version` |
+
+Observed: after a commit bumping `appVersion` 0.1.0 → 0.1.1, both engines
+reported the same commit as their current revision, Argo CD had rolled a new pod
+serving `0.1.1`, and Flux was still serving `0.1.0` twelve minutes later. Flux's
+`HelmChart` still read `version=0.1.0+1`, `reconcileStrategy=ChartVersion`.
+
+This is not a defect. `HelmChart.spec.reconcileStrategy` defaults to
+`ChartVersion`, which is the right default for a chart pulled from a registry
+and the wrong one for a chart that lives beside the application in the same
+repository. This bench sets `reconcileStrategy: Revision` on the HelmRelease,
+and says so in the manifest with the measurement attached.
+
+If you take one operational thing from this repository, take this one: a Flux
+HelmRelease pointed at a co-located chart will silently ignore your commits
+until you set it.
+
+## 5. Convergence latency — and why the number is almost meaningless
+
+*Measured*, with `hack/demo-converge.sh`, one commit bumping `appVersion`:
+
+| | commit noticed | pod serving the new release |
+|---|---|---|
+| Flux 2.9.5 | 7s | 15s |
+| Argo CD 3.5.3 | 348s | 354s |
+
+**This does not mean Flux is twenty times faster.** It measures the polling
+intervals this bench configures and nothing else:
+
+- Flux's `GitRepository` and `Kustomization` are set to `interval: 1m` in
+  `platform/flux/`.
+- Argo CD's repository polling is left at its default of 3 minutes.
+
+Both engines support webhooks, which remove polling from the picture entirely.
+The honest conclusion is the boring one: each engine converged on the cadence it
+was told to use. The number is reported here because omitting it would look like
+concealment, and qualified because quoting it bare would be dishonest.
+
+## 6. Values files
 
 Both consume the chart's own per-environment values natively, with no
 duplication and no engine-specific copy of the manifests:
@@ -84,7 +133,7 @@ duplication and no engine-specific copy of the manifests:
 version '0.1.0+1' and merged values files [apps/ticketflow/chart/values.yaml
 apps/ticketflow/chart/values-dev.yaml]`.
 
-## 5. Operator surface
+## 7. Operator surface
 
 | | Argo CD 3.5.3 | Flux 2.9.5 |
 |---|---|---|
@@ -97,7 +146,7 @@ apps/ticketflow/chart/values-dev.yaml]`.
 `make ui-argocd` port-forwards the real UI. `make ui-flux` does not pretend an
 equivalent exists: it runs `flux check` and lists the reconciled objects.
 
-## 6. Kubernetes support windows
+## 8. Kubernetes support windows
 
 | | Supported |
 |---|---|
@@ -108,7 +157,7 @@ The intersection is **1.33 – 1.36**. Argo CD sets the ceiling, not Flux — wh
 is why this repository pins `kindest/node:v1.36.4` by digest rather than using
 kind v0.33.0's default of v1.37.
 
-## 7. One thing that is not a difference
+## 9. One thing that is not a difference
 
 Helm 4 replaced the boolean `--wait` with a strategy. Under `watcher` — what
 plain `--wait` selects — the Helm **CLI** never observed the migration hook Job
