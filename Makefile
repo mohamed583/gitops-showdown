@@ -7,6 +7,10 @@ SHELL       := /usr/bin/env bash
 .SHELLFLAGS := -euo pipefail -c
 .DEFAULT_GOAL := help
 
+# Sub-makes are an implementation detail of `up` and `down`; their
+# "Entering directory" chatter is not.
+MAKEFLAGS += --no-print-directory
+
 ROOT_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 include $(ROOT_DIR)/hack/versions.env
 export
@@ -30,7 +34,7 @@ CHART_DIR := $(ROOT_DIR)/apps/ticketflow/chart
 # 300s is comfortably too short on a cold cache. Override for a warm one.
 WAIT_TIMEOUT ?= 900s
 
-.PHONY: help versions preflight lint build test venv template smoke \
+.PHONY: help versions preflight lint build test venv template smoke up-clusters \
         git-server git-server-down bootstrap bootstrap-argocd bootstrap-flux diverge \
         up up-argocd up-flux down down-argocd down-flux \
         status ui-argocd ui-flux
@@ -56,9 +60,22 @@ preflight: ## Check host tooling and versions before creating anything
 
 ##@ Bring up
 
-up: up-argocd up-flux ## Bring up both clusters and both engines
+up: ## Bring up everything: both clusters, both engines, both reconciling from Git
+	@# The order is not arbitrary and is the whole reason this target exists.
+	@# Clusters first, obviously. Then `build`, because the chart pins
+	@# imagePullPolicy: IfNotPresent and there is no registry -- bootstrapping
+	@# before the image is side-loaded gives you ImagePullBackOff in both
+	@# clusters. Then the Git server, because it also writes the CoreDNS entry
+	@# the engines need to resolve it. Only then can either engine reconcile.
+	$(MAKE) up-argocd
+	$(MAKE) up-flux
+	$(MAKE) build
+	$(MAKE) git-server
+	$(MAKE) bootstrap
 	@echo ""
-	@echo "==> both control planes are up. Next: make status"
+	@echo "==> the bench is up. Try: make status, then make diverge"
+
+up-clusters: up-argocd up-flux ## Just the two clusters and the two engines, nothing deployed
 
 up-argocd: preflight ## Create the Argo CD cluster and install Argo CD
 	@if kind get clusters 2>/dev/null | grep -qx '$(CLUSTER_ARGOCD)'; then \
@@ -117,6 +134,15 @@ bootstrap: bootstrap-argocd bootstrap-flux ## Point both engines at the shared G
 bootstrap-argocd: ## Apply the Argo CD app-of-apps root and let it pull the rest
 	@echo "==> applying the Argo CD root application"
 	@$(KA) apply --server-side --force-conflicts -f $(ROOT_DIR)/platform/argocd/bootstrap.yaml
+	@# The child Application does not exist yet: the root app has to sync first
+	@# and create it. `kubectl wait` on a resource that is not there fails
+	@# immediately with NotFound, which only ever shows up on a cold start --
+	@# on a re-run the Application is already present and the race is invisible.
+	@echo "==> waiting for the root application to create ticketflow"
+	@for i in $$(seq 1 90); do \
+	   if $(KA) -n $(ARGOCD_NAMESPACE) get application ticketflow >/dev/null 2>&1; then break; fi; \
+	   sleep 2; \
+	 done
 	@echo "==> waiting for the ticketflow Application to become Healthy"
 	@$(KA) -n $(ARGOCD_NAMESPACE) wait --for=jsonpath='{.status.health.status}'=Healthy \
 	   application/ticketflow --timeout=$(WAIT_TIMEOUT)
@@ -125,6 +151,13 @@ bootstrap-argocd: ## Apply the Argo CD app-of-apps root and let it pull the rest
 bootstrap-flux: ## Apply the Flux GitRepository + Kustomization and let it pull the rest
 	@echo "==> applying the Flux bootstrap manifest"
 	@$(KF) apply --server-side --force-conflicts -f $(ROOT_DIR)/platform/flux/bootstrap.yaml
+	@# Same race as Argo CD above: the HelmRelease is created by the Kustomization
+	@# reconciling, not by the manifest just applied.
+	@echo "==> waiting for the Kustomization to create the HelmRelease"
+	@for i in $$(seq 1 90); do \
+	   if $(KF) -n ticketflow get helmrelease ticketflow >/dev/null 2>&1; then break; fi; \
+	   sleep 2; \
+	 done
 	@echo "==> waiting for the ticketflow HelmRelease to become Ready"
 	@$(KF) -n ticketflow wait --for=condition=Ready helmrelease/ticketflow --timeout=$(WAIT_TIMEOUT)
 	@echo "==> Flux has converged"
@@ -199,7 +232,10 @@ ui-flux: ## Show Flux state -- Flux ships no web UI, this is the honest equivale
 
 ##@ Tear down
 
-down: down-argocd down-flux ## Delete both clusters
+down: ## Delete both clusters and the local Git server
+	@$(MAKE) git-server-down
+	@$(MAKE) down-argocd
+	@$(MAKE) down-flux
 	@echo "==> everything is gone"
 
 down-argocd: ## Delete the Argo CD cluster

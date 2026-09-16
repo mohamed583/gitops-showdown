@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 600" width="980" height="600" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif" role="img" aria-labelledby="title desc">
+  <title id="title">gitops-showdown architecture</title>
+  <desc id="desc">One Helm chart in one Git repository, served by a local Gitea container on the kind Docker network, reconciled by Argo CD in one kind cluster and by Flux in another. Argo CD renders the chart with helm template and applies it itself, leaving no Helm release. Flux runs a real helm upgrade through helm-controller, leaving a Helm release with history.</desc>
+
+  <style>
+    .bg      { fill: #fbfaf8; }
+    .card    { fill: #ffffff; stroke: #d9d4cc; stroke-width: 1.5; rx: 10; }
+    .cluster { fill: #f5f2ed; stroke: #c9c2b6; stroke-width: 1.5; stroke-dasharray: 5 4; rx: 12; }
+    .argo    { fill: #eef4fb; stroke: #7aa7d9; stroke-width: 1.5; rx: 9; }
+    .flux    { fill: #f0f5ee; stroke: #85ab77; stroke-width: 1.5; rx: 9; }
+    .git     { fill: #fdf3e7; stroke: #d9a35c; stroke-width: 1.5; rx: 10; }
+    .h       { font-size: 15px; font-weight: 650; fill: #2c2a26; }
+    .t       { font-size: 12.5px; fill: #3d3a35; }
+    .s       { font-size: 11px; fill: #6f6a61; }
+    .mono    { font-size: 11px; font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; fill: #4a463f; }
+    .lbl     { font-size: 10.5px; font-weight: 600; fill: #6f6a61; letter-spacing: .06em; }
+    .edge    { stroke: #9b958a; stroke-width: 1.8; fill: none; marker-end: url(#a); }
+    .edgeA   { stroke: #5b87ba; stroke-width: 2; fill: none; marker-end: url(#aA); }
+    .edgeF   { stroke: #6a9159; stroke-width: 2; fill: none; marker-end: url(#aF); }
+    .verdict { font-size: 12px; font-weight: 650; }
+    @media (prefers-color-scheme: dark) {
+      .bg      { fill: #1a1917; }
+      .card    { fill: #232220; stroke: #403d38; }
+      .cluster { fill: #1f1e1c; stroke: #423f39; }
+      .argo    { fill: #1c2530; stroke: #4a6f9b; }
+      .flux    { fill: #1e2620; stroke: #55764a; }
+      .git     { fill: #2a2117; stroke: #8a6733; }
+      .h       { fill: #ece8e1; } .t { fill: #cdc8c0; } .s { fill: #948e84; }
+      .mono    { fill: #bdb8b0; } .lbl { fill: #948e84; }
+      .edge    { stroke: #6d675e; } .edgeA { stroke: #7aa7d9; } .edgeF { stroke: #85ab77; }
+    }
+  </style>
+
+  <defs>
+    <marker id="a"  viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9b958a"/></marker>
+    <marker id="aA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5b87ba"/></marker>
+    <marker id="aF" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6a9159"/></marker>
+  </defs>
+
+  <rect class="bg" width="980" height="600"/>
+
+  <!-- ── source of truth ────────────────────────────────────────────── -->
+  <text class="lbl" x="40" y="34">ONE SOURCE OF TRUTH</text>
+
+  <rect class="git" x="40" y="46" width="250" height="126"/>
+  <text class="h"    x="60" y="72">Gitea</text>
+  <text class="s"    x="60" y="90">container on the kind Docker network</text>
+  <text class="mono" x="60" y="112">gitea.showdown.local:3000</text>
+  <text class="s"    x="60" y="132">resolved via a hosts entry written</text>
+  <text class="s"    x="60" y="148">into each cluster's CoreDNS</text>
+  <text class="s"    x="60" y="164">GIT_REMOTE overrides all of this</text>
+
+  <rect class="card" x="40" y="194" width="250" height="118"/>
+  <text class="h"    x="60" y="220">apps/ticketflow/chart</text>
+  <text class="s"    x="60" y="238">the only definition of the app</text>
+  <text class="mono" x="60" y="260">values.yaml</text>
+  <text class="mono" x="60" y="278">values-dev.yaml</text>
+  <text class="mono" x="60" y="296">templates/migration-job.yaml</text>
+
+  <text class="s" x="40" y="338">FastAPI + PostgreSQL + an Alembic</text>
+  <text class="s" x="40" y="354">migration Job. The Job is the</text>
+  <text class="s" x="40" y="370">deliberate point of divergence.</text>
+
+  <!-- ── edges from git to the two engines ──────────────────────────── -->
+  <path class="edgeA" d="M290 100 C 340 100, 350 96, 396 96"/>
+  <path class="edgeF" d="M290 128 C 340 128, 350 356, 396 356"/>
+  <text class="s" x="306" y="88">pull</text>
+  <text class="s" x="306" y="232">pull</text>
+
+  <!-- ══ ARGO CD CLUSTER ═══════════════════════════════════════════════ -->
+  <rect class="cluster" x="396" y="46" width="548" height="236"/>
+  <text class="lbl" x="416" y="72">KIND CLUSTER · showdown-argocd · k8s v1.36.4</text>
+
+  <rect class="argo" x="416" y="86" width="200" height="82"/>
+  <text class="h"  x="434" y="112">Argo CD 3.5.3</text>
+  <text class="s"  x="434" y="130">repo-server renders with</text>
+  <text class="mono" x="434" y="148">helm template</text>
+  <text class="s"  x="434" y="162">then applies the output itself</text>
+
+  <path class="edgeA" d="M616 127 L 676 127"/>
+
+  <rect class="card" x="676" y="86" width="248" height="82"/>
+  <text class="h" x="694" y="112">ticketflow</text>
+  <text class="s" x="694" y="130">Deployment · StatefulSet · Service</text>
+  <text class="s" x="694" y="148">migration Job runs as PostSync</text>
+
+  <rect class="argo" x="416" y="184" width="508" height="76"/>
+  <text class="verdict" x="434" y="210" fill="#2f5c8f">No Helm release exists.</text>
+  <text class="mono"    x="434" y="230">helm list → empty · release Secrets → 0</text>
+  <text class="s"       x="434" y="248">Undo goes through argocd app rollback, over Git history.</text>
+
+  <!-- ══ FLUX CLUSTER ══════════════════════════════════════════════════ -->
+  <rect class="cluster" x="396" y="306" width="548" height="236"/>
+  <text class="lbl" x="416" y="332">KIND CLUSTER · showdown-flux · k8s v1.36.4</text>
+
+  <rect class="flux" x="416" y="346" width="200" height="82"/>
+  <text class="h"  x="434" y="372">Flux 2.9.5</text>
+  <text class="s"  x="434" y="390">helm-controller performs a</text>
+  <text class="mono" x="434" y="408">real helm install/upgrade</text>
+  <text class="s"  x="434" y="422">through the Helm SDK</text>
+
+  <path class="edgeF" d="M616 387 L 676 387"/>
+
+  <rect class="card" x="676" y="346" width="248" height="82"/>
+  <text class="h" x="694" y="372">ticketflow</text>
+  <text class="s" x="694" y="390">Deployment · StatefulSet · Service</text>
+  <text class="s" x="694" y="408">migration Job runs as a Helm hook</text>
+
+  <rect class="flux" x="416" y="444" width="508" height="76"/>
+  <text class="verdict" x="434" y="470" fill="#4a6b3c">A real Helm release exists.</text>
+  <text class="mono"    x="434" y="490">helm history ticketflow → revision 1 · release Secrets → 1</text>
+  <text class="s"       x="434" y="508">helm rollback works, and .spec.upgrade.remediation automates it.</text>
+
+  <!-- ── footer ─────────────────────────────────────────────────────── -->
+  <text class="s" x="40" y="576">Identical cluster topology, identical install path (kubectl apply of a pinned upstream manifest), identical chart and values.</text>
+  <text class="s" x="40" y="592">Neither engine is advantaged by the setup, so a measured difference is a difference in the engine. See docs/adr/001.</text>
+</svg>
