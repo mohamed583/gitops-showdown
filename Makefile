@@ -272,9 +272,18 @@ test: ## Run the ticketflow unit tests and ruff
 	  echo "==> pytest" && $$PY -m pytest -q
 
 venv: ## Create the ticketflow virtualenv and install it with dev extras
+	@# `python` does not exist on a bare Debian or Ubuntu -- only `python3` --
+	@# and `py` is the Windows launcher. Try all three rather than assuming one.
 	@cd $(ROOT_DIR)/apps/ticketflow && \
-	  python -m venv .venv 2>/dev/null || py -3.13 -m venv .venv; \
+	  if [ ! -x .venv/bin/python ] && [ ! -x .venv/Scripts/python.exe ]; then \
+	    for candidate in python3 python "py -3.13"; do \
+	      if $$candidate -m venv .venv >/dev/null 2>&1; then break; fi; \
+	    done; \
+	  fi; \
 	  PY=$$( [ -x .venv/bin/python ] && echo .venv/bin/python || echo .venv/Scripts/python.exe ); \
+	  if [ ! -x "$$PY" ]; then \
+	    echo "could not create a virtualenv -- no python3, python or py on PATH" >&2; exit 1; \
+	  fi; \
 	  $$PY -m pip install -q --upgrade pip && $$PY -m pip install -q -e ".[dev]" && \
 	  echo "==> venv ready"
 
@@ -351,4 +360,15 @@ lint: ## Lint shell scripts, YAML and the Helm chart
 	          || echo $(ROOT_DIR)/apps/ticketflow/.venv/Scripts/python.exe ); \
 	   $$PY -m ruff check $(ROOT_DIR)/hack; \
 	 else echo "==> ruff (hack)  SKIPPED (no venv -- run: make venv)"; fi
+	@# `chmod +x` does not reach git when core.fileMode is false, which is the
+	@# default on Windows -- so a script can be executable on the author's disk
+	@# and 100644 for everyone who clones on Linux or macOS. Check the INDEX,
+	@# which is identical on every platform.
+	@echo "==> exec bits"
+	@bad=$$(git -C $(ROOT_DIR) ls-files -s hack/ \
+	        | awk '$$4 ~ /\.sh$$/ && $$1 != "100755" {print $$4}'); \
+	 if [ -n "$$bad" ]; then \
+	   echo "    not executable in git:"; echo "$$bad" | sed 's/^/      /'; \
+	   echo "    fix: git update-index --chmod=+x <file>"; exit 1; \
+	 fi
 	@echo "==> lint clean"
