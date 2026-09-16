@@ -133,7 +133,31 @@ duplication and no engine-specific copy of the manifests:
 version '0.1.0+1' and merged values files [apps/ticketflow/chart/values.yaml
 apps/ticketflow/chart/values-dev.yaml]`.
 
-## 7. Operator surface
+## 7. Secrets
+
+*Sourced, not measured -- this bench does not exercise either path. Reported
+because it is one of the more decision-relevant differences between the two.*
+
+| | Argo CD 3.5.3 | Flux 2.9.5 |
+|---|---|---|
+| Decrypts secrets itself | **no** | **yes**, `Kustomization.spec.decryption` |
+| Providers | — | `sops`: age, OpenPGP, AWS KMS, Azure Key Vault, GCP KMS, OpenBao/Vault |
+| Documented approach | external operators on the destination cluster, or a plugin such as `argocd-vault-plugin` | native, in `kustomize-controller` |
+
+Flux: *"`.provider`: The secrets decryption provider to be used. This field is
+required and the only supported value is `sops`."*
+([source](https://fluxcd.io/flux/components/kustomize/kustomizations/))
+
+Argo CD documents no native decryption and recommends keeping secrets away from
+the engine entirely — *"Argo CD does not need to directly manage them"* —
+delegating to Sealed Secrets, External Secrets Operator or the Secrets Store CSI
+Driver ([source](https://argo-cd.readthedocs.io/en/stable/operator-manual/secret-management/)).
+
+Neither position is wrong: Flux is more convenient and puts a decryption key
+inside the controller; Argo CD keeps the engine out of the key material and
+pushes the problem to a purpose-built operator. See [ADR 005](adr/005-secrets-management.md).
+
+## 8. Operator surface
 
 | | Argo CD 3.5.3 | Flux 2.9.5 |
 |---|---|---|
@@ -146,7 +170,7 @@ apps/ticketflow/chart/values-dev.yaml]`.
 `make ui-argocd` port-forwards the real UI. `make ui-flux` does not pretend an
 equivalent exists: it runs `flux check` and lists the reconciled objects.
 
-## 8. Kubernetes support windows
+## 9. Kubernetes support windows
 
 | | Supported |
 |---|---|
@@ -157,7 +181,7 @@ The intersection is **1.33 – 1.36**. Argo CD sets the ceiling, not Flux — wh
 is why this repository pins `kindest/node:v1.36.4` by digest rather than using
 kind v0.33.0's default of v1.37.
 
-## 9. One thing that is not a difference
+## 10. One thing that is not a difference
 
 Helm 4 replaced the boolean `--wait` with a strategy. Under `watcher` — what
 plain `--wait` selects — the Helm **CLI** never observed the migration hook Job

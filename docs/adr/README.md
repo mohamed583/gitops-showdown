@@ -31,7 +31,9 @@ Two rules keep these honest:
 |---|---|---|
 | [001](001-argocd-vs-flux.md) | Compare Argo CD and Flux on one shared Helm chart | Accepted |
 | [002](002-migration-as-helm-hook.md) | Express the schema migration as a Helm hook, and as nothing else | Accepted |
+| [003](003-two-clusters.md) | Two separate clusters, not two namespaces | Accepted |
+| [004](004-local-git-server.md) | A local Git server, on the kind Docker network | Accepted |
+| [005](005-secrets-management.md) | Secrets: what this bench does, and what it refuses to pretend | Accepted |
 
-Further records (cluster topology, the local Git server, secrets management)
-are written as the corresponding code lands. This index lists only what
-exists; records are numbered in the order decisions are made.
+Records are numbered in the order decisions are made. This index lists only what
+exists.

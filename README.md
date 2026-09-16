@@ -233,6 +233,7 @@ with its own hooks and sync waves, leaving no Helm release at all. See
 - [ADR index](docs/adr/README.md) — decisions, with their rejected alternatives
 - [ADR 001](docs/adr/001-argocd-vs-flux.md) — why this comparison, and how it is kept fair
 - [ADR 002](docs/adr/002-migration-as-helm-hook.md) — the migration hook, and why Argo CD forced its phase to change
+- [ADR 003](docs/adr/003-two-clusters.md) · [ADR 004](docs/adr/004-local-git-server.md) · [ADR 005](docs/adr/005-secrets-management.md) — cluster topology, the local Git remote, secrets
 - [SECURITY.md](SECURITY.md) — **read before exposing anything**; the bench is deliberately unhardened
 
 ---
