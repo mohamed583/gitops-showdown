@@ -10,8 +10,12 @@
 #
 # KNOWN LIMITATION: VHS does not work on Windows. `vhs validate` passes and
 # `vhs hack/demo.tape` prints "Creating docs/assets/showdown.gif..." and exits 0,
-# but no file is written -- reproduced on a minimal tape too. Render on macOS,
-# Linux or WSL.
+# but no file is written -- reproduced on a minimal tape too. PowerSession, the
+# Windows asciinema recorder, panics instead.
+#
+# The committed GIF was therefore produced by hack/record-demo.py, which runs
+# the same commands and assembles the asciicast directly. This tape is kept
+# because it is the better tool wherever it works: use it on macOS or Linux.
 #
 # This tape is READ-ONLY against the clusters. It deliberately does NOT run
 # hack/demo-converge.sh: that takes about six minutes, almost all of it waiting

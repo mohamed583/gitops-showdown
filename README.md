@@ -7,13 +7,14 @@ This is a comparison bench, not a tutorial. Both engines consume the same chart
 on identically-configured clusters, so neither is advantaged by the setup and a
 difference you observe is a difference in the engine.
 
-![architecture](docs/architecture.svg)
+![gitops-showdown demo](docs/assets/showdown.gif)
 
-> **Terminal recording:** [`hack/demo.tape`](hack/demo.tape) renders it with
-> [VHS](https://github.com/charmbracelet/vhs) (`vhs hack/demo.tape` → `docs/assets/showdown.gif`).
-> The tape validates, but VHS does not produce output on Windows — it reports
-> success and writes no file — so the GIF is not committed rather than faked.
-> Render it on macOS, Linux or WSL.
+<sub>Recorded by [`hack/record-demo.py`](hack/record-demo.py) against the live
+clusters. Every line of output is the real stdout of the real command; only the
+typing and the pauses are synthesised, as they are in any scripted terminal
+recording. Replay it with `asciinema play docs/assets/showdown.cast`.</sub>
+
+![architecture](docs/architecture.svg)
 
 ---
 
