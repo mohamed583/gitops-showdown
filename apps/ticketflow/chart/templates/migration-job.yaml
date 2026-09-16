@@ -36,17 +36,14 @@ metadata:
     {{- include "ticketflow.labels" . | nindent 4 }}
     app.kubernetes.io/component: migration
   annotations:
-    # post-install, NOT pre-install -- and the distinction is not cosmetic.
+    # Never pre-install: Helm runs pre-install hooks before it creates any of
+    # the chart's normal resources, so there is no PostgreSQL yet and the Job
+    # waits until activeDeadlineSeconds kills it. Observed, not theorised --
+    # during that phase the namespace held exactly one object, this Job.
     #
-    # Helm runs pre-install hooks before it creates any of the chart's normal
-    # resources. On a first install there is therefore no Postgres Service and
-    # no StatefulSet yet, and a migration hooked on pre-install waits for a
-    # database that does not exist until activeDeadlineSeconds kills it. That
-    # is not a theory: it is what this chart did until the smoke test caught it.
-    #
-    # post-install runs once Postgres exists; pre-upgrade runs before the new
-    # application pods roll, which is exactly when a schema change must land.
-    "helm.sh/hook": post-install,pre-upgrade
+    # The remaining choice is set by .Values.migration.hook, and it differs per
+    # engine for a reason documented at length there and in docs/adr/002.
+    "helm.sh/hook": {{ .Values.migration.hook | quote }}
     # Argo CD maps this to sync-wave "-5". It orders the migration against any
     # other hook in the same phase.
     "helm.sh/hook-weight": "-5"

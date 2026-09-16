@@ -21,20 +21,29 @@ The following are known, intentional, and scoped to a local lab.
 
 ### Gitea runs in development mode, with default credentials
 
-From session 3 the repository ships a local Gitea instance, attached to the
-`kind` Docker network so both clusters can reach the same Git remote. It runs
-with **installation-time defaults and a well-known username and password
-committed to this repository**, over plain HTTP, with no TLS and no real
-authentication.
+`make git-server` starts a local Gitea container attached to the `kind` Docker
+network, so both clusters reach the same Git remote. It runs with
+**installation-time defaults and a well-known username and password committed to
+this repository** (`showdown` / `showdown-dev-only`, in `hack/versions.env`),
+over plain HTTP, with no TLS. The repository it serves is public and both engines
+clone it anonymously — there is no credential in any manifest.
+
+`hack/git-server.sh` also writes a `hosts` entry into each cluster's CoreDNS
+ConfigMap, mapping `gitea.showdown.local` to the container's address on the kind
+network. Pods resolve through CoreDNS rather than Docker's embedded DNS, so
+attaching the container to the network is necessary but not sufficient. That
+edit is confined to the two disposable `showdown-*` clusters.
 
 This is a deliberate trade-off: without a Git remote both clusters can reach, the
 "one commit, two engines" demonstration only works on the author's machine. The
 credentials are default *so that they are not secret* — they grant access to an
 empty throwaway Git server and nothing else.
 
-**Do not expose Gitea beyond localhost.** It is bound for local use only. If you
-need the bench reachable from elsewhere, point the engines at a real remote
-instead, with `GIT_REMOTE`.
+**Do not expose Gitea beyond localhost.** The container publishes its HTTP port
+on the host (3300 by default; 3000 is commonly taken) purely so you can push and
+browse. If you need the bench reachable from elsewhere, set `GIT_REMOTE` to a
+real remote instead — `hack/git-server.sh` then becomes a no-op and no local Git
+server is started at all.
 
 ### Argo CD is installed with its upstream defaults
 

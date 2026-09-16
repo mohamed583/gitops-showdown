@@ -1,0 +1,39 @@
+# ticketflow, delivered by Argo CD.
+#
+# Same repository, same chart directory, same values files as the Flux
+# HelmRelease in platform/flux/releases/ticketflow.yaml. The only difference is
+# which engine reads them.
+#
+# Argo CD renders this chart with `helm template` and applies the output itself:
+# no Helm release is created, so `helm list` in this cluster shows nothing and
+# rollback goes through `argocd app rollback` over Git history instead of
+# `helm rollback`. That is the divergence this repository exists to show.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ticketflow
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: showdown
+  source:
+    repoURL: http://gitea.showdown.local:3000/showdown/gitops-showdown.git
+    targetRevision: main
+    path: apps/ticketflow/chart
+    helm:
+      # Consumed natively, exactly as Flux consumes valuesFiles. Paths are
+      # relative to the chart directory above.
+      valueFiles:
+        - values.yaml
+        - values-dev.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ticketflow
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

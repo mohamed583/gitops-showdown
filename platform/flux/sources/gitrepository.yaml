@@ -1,0 +1,20 @@
+# The single source of truth for the Flux side of the bench.
+#
+# The URL is the CONTAINER port of the Gitea container (3000), resolved through
+# the CoreDNS hosts entry that hack/git-server.sh installs. The port published
+# on your workstation is a different number and is irrelevant here: this is
+# resolved and dialled by source-controller, inside the cluster.
+#
+# Anonymous HTTP, no secretRef: the repository is public on a dev-mode Gitea.
+# See SECURITY.md.
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: showdown
+  namespace: flux-system
+spec:
+  interval: 1m
+  url: http://gitea.showdown.local:3000/showdown/gitops-showdown.git
+  ref:
+    branch: main

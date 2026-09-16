@@ -1,0 +1,35 @@
+# ticketflow, delivered by Flux.
+#
+# This consumes apps/ticketflow/chart -- the SAME directory Argo CD consumes.
+# Neither engine gets its own copy of the manifests; the values files are the
+# chart's own, referenced natively through HelmChart.spec.valuesFiles.
+#
+# helm-controller performs a real Helm install/upgrade through the Helm SDK, so
+# a Helm release exists here with history that `helm history` can read -- which
+# is precisely what does NOT happen on the Argo CD side.
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: ticketflow
+  namespace: ticketflow
+spec:
+  interval: 1m
+  releaseName: ticketflow
+  chart:
+    spec:
+      chart: apps/ticketflow/chart
+      sourceRef:
+        kind: GitRepository
+        name: showdown
+        namespace: flux-system
+      valuesFiles:
+        - apps/ticketflow/chart/values.yaml
+        - apps/ticketflow/chart/values-dev.yaml
+      interval: 1m
+  install:
+    remediation:
+      retries: 2
+  upgrade:
+    remediation:
+      retries: 2

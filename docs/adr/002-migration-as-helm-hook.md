@@ -1,7 +1,7 @@
 # 002 — Express the schema migration as a Helm hook, and as nothing else
 
 - **Status:** Accepted
-- **Date:** 2026-09-15
+- **Date:** 2026-09-15, revised 2026-09-16 with results from running both engines
 
 ## Context
 
@@ -25,24 +25,20 @@ divergence would be an artefact of the annotations.
 **The migration Job carries `helm.sh/*` annotations only. No
 `argocd.argoproj.io/*` annotation appears anywhere in the chart.**
 
-```yaml
-"helm.sh/hook": post-install,pre-upgrade
-"helm.sh/hook-weight": "-5"
-"helm.sh/hook-delete-policy": before-hook-creation
-```
-
-Both engines consume that identical manifest and diverge only in execution:
+Both engines consume that identical manifest and diverge only in execution.
+Measured on this bench, same chart, same commit, same application:
 
 | | Argo CD 3.5.3 | Flux 2.9.5 |
 |---|---|---|
-| How the hook runs | `helm template` renders it; Argo CD maps `post-install`/`pre-upgrade` to `PostSync`/`PreSync` and `hook-weight` to a sync-wave, then applies it itself | Helm itself runs it, inside a real `helm upgrade` |
-| Helm release afterwards | none | yes, with history |
+| How the hook runs | `helm template` renders it; Argo CD maps the Helm hook to its own phase and applies it | Helm itself runs it, inside a real `helm install`/`upgrade` |
+| `helm list` in the app namespace | **empty** | `ticketflow`, revision 1 |
+| Helm release storage Secrets | **0** | 1 (`sh.helm.release.v1.ticketflow.v1`) |
 | Undo path | `argocd app rollback` over Git history | `helm rollback` / `.spec.upgrade.remediation` |
 | `pre-rollback` / `post-rollback` hooks | **ignored — unsupported** | executed |
 
-## Why `post-install` and not `pre-install`
+`make diverge` prints the first three rows from the live clusters.
 
-This was wrong in the first draft, and the smoke test caught it.
+## Never `pre-install`
 
 Helm runs `pre-install` hooks **before it creates any of the chart's normal
 resources**. On a first install there is therefore no PostgreSQL Service and no
@@ -51,9 +47,34 @@ that does not exist until `activeDeadlineSeconds` kills the Job. Observed
 directly: during the `pre-install` phase the namespace contained exactly one
 object, the migration Job itself.
 
-`post-install` runs once PostgreSQL exists. `pre-upgrade` runs before the new
-application pods roll, which is when a schema change must land. The pair covers
-both cases correctly.
+## Why the hook phase had to become a chart value
+
+The textbook choice is `post-install,pre-upgrade`: migrate after the database
+exists on first install, and before the new pods roll on every upgrade. Flux
+honours exactly that, because helm-controller runs a real Helm install or
+upgrade and Helm knows which one it is performing.
+
+**Argo CD has no such distinction, and this deadlocks the first sync.** It
+translates `pre-upgrade` to `PreSync` and runs it on *every* sync, including the
+very first — before PostgreSQL exists, because PostgreSQL is created in the
+`Sync` phase that `PreSync` is blocking. Observed on this bench: the `ticketflow`
+namespace contained nothing but the migration Job, its init container logging
+`ticketflow-postgres…:5432 - no response` for four minutes, while the
+Application reported `waiting for completion of hook batch/Job/ticketflow-migrate`.
+The identical manifest had installed cleanly under Flux minutes earlier.
+
+`.Values.migration.hook` therefore defaults to **`post-install,post-upgrade`**,
+which maps to `PostSync` on Argo CD and runs after the database exists on both
+engines. The cost is real and is not hidden: on an upgrade the schema changes
+*after* the new pods have rolled, which is only safe for additive migrations.
+
+In production the answer is not a different annotation, it is a different
+boundary: keep the database out of the application's release, and `pre-upgrade`
+becomes safe on both engines. This bench cannot do that without giving each
+engine its own chart, which ADR 001 forbids.
+
+Setting `migration.hook=post-install,pre-upgrade` reproduces the Argo CD
+deadlock deliberately. It is the sharpest demonstration in this repository.
 
 ## Why readiness checks connectivity only
 
@@ -66,37 +87,42 @@ waits for the pod. Liveness does not touch the database at all, so a database
 incident cannot escalate into an application restart loop.
 
 The cost is a window, on first install only, where the API is in the Service but
-`/tickets` fails because the table does not exist yet. That is accepted: the
-alternative is an install that never completes.
+`/tickets` fails because the table does not exist yet.
+
+## A Helm 4 hazard in the CLI — tested against Flux, and not reproduced
+
+Helm 4 replaced the boolean `--wait` with a strategy: `watcher`, `hookOnly` or
+`legacy`. Under `watcher` — what plain `--wait` selects — the Helm **CLI** did
+not observe this hook Job completing: the Job reached `Complete` with
+`succeeded: 1` in six seconds while Helm waited until its timeout, nineteen
+minutes later. `--wait=legacy` returns in under twenty seconds, which is why
+`make smoke` pins it.
+
+The obvious worry was that Flux inherits this. Flux 2.9.5 ships helm-controller
+v1.6.4, which links `helm.sh/helm/v4 v4.2.4` and sets
+`install.WaitStrategy` from the HelmRelease's own `.spec.waitStrategy`
+(`poller`, the kstatus-based default, or `legacy`).
+
+**Tested, and it does not reproduce.** With the default `poller` strategy and no
+override, the HelmRelease went from `Progressing` to `InstallSucceeded` in 79
+seconds, the hook Job completing in 8. No `waitStrategy` override is needed and
+none is set. The hazard is specific to the Helm CLI's `watcher` strategy.
+
+Recorded because the reasoning was sound and the conclusion was wrong: the
+escape hatch exists at `.spec.waitStrategy.name` if a future version regresses.
 
 ## Consequences
 
 - The chart cannot use any Argo CD-specific sync behaviour — sync options,
   selective sync waves on non-hook resources, `Replace=true`. Argo CD is
-  therefore not shown at its most expressive. That is the price of a fair bench,
-  and it is stated in the README rather than hidden.
+  therefore not shown at its most expressive. That is the price of a fair bench.
 - `pre-rollback` and `post-rollback` hooks are unusable, because Argo CD ignores
-  them. Rollback behaviour has to be compared through each engine's own
-  mechanism instead of a shared one.
+  them. Rollback has to be compared through each engine's own mechanism.
+- The default hook phase is a compromise driven by the weaker of the two
+  engines' hook models, not by what is best for a migration.
 - A deliberately failing migration is available behind
   `migration.failOnPurpose=true`, so the two engines can be compared on failure
   and not only on the happy path.
-
-## A Helm 4 hazard this surfaced, carried into session 3
-
-Helm 4 replaced the boolean `--wait` with a strategy: `watcher`, `hookOnly` or
-`legacy`. Under the `watcher` strategy — what plain `--wait` selects — Helm did
-not observe this hook Job completing: the Job reached `Complete` with
-`succeeded: 1` in six seconds while Helm waited until its timeout, nineteen
-minutes later. `--wait=legacy` returns in under twenty seconds. `make smoke`
-pins `legacy` for that reason.
-
-This matters beyond the smoke test. Flux 2.9.5 ships helm-controller v1.6.4,
-which links `helm.sh/helm/v4 v4.2.4` — the same generation of the Helm SDK. If
-helm-controller waits on hook Jobs through the same code path, a HelmRelease
-carrying this Job could stall the same way. **Verify this explicitly when the
-Flux control plane is wired up in session 3**, and treat a stall as a suspected
-upstream issue rather than a chart defect.
 
 ## Alternatives considered
 
@@ -105,11 +131,10 @@ more than one replica, every pod races to migrate the same schema, and there is
 no single place to observe success or failure. It would also erase the
 divergence this bench exists to show, since there would be no hook at all.
 
-**Annotate PostgreSQL as a hook too, with a lower weight, so `pre-install` could
-work.** Rejected. It makes a database part of the hook lifecycle, where a
-`before-hook-creation` delete policy would drop and recreate it on every
-upgrade. Defensible in a lab, indefensible as a pattern, and the repository
-should not teach it.
+**Annotate PostgreSQL as a hook too, with a lower weight.** Rejected. It makes a
+database part of the hook lifecycle, where a `before-hook-creation` delete
+policy would drop and recreate it on every upgrade. Defensible in a lab,
+indefensible as a pattern, and the repository should not teach it.
 
 **Run migrations from the application at startup.** Rejected. It couples schema
 changes to pod restarts, gives no failure surface a GitOps engine can act on,

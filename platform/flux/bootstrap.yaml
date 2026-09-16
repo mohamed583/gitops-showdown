@@ -1,0 +1,26 @@
+# The single manifest `make bootstrap-flux` applies by hand. Everything after
+# this point is reconciled from Git, including this GitRepository itself.
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: showdown
+  namespace: flux-system
+spec:
+  interval: 1m
+  url: http://gitea.showdown.local:3000/showdown/gitops-showdown.git
+  ref:
+    branch: main
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: showdown
+  namespace: flux-system
+spec:
+  interval: 1m
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: showdown
+  path: ./platform/flux

@@ -1,0 +1,42 @@
+# The single manifest `make bootstrap-argocd` applies by hand. The root
+# Application then pulls everything else from Git -- the app-of-apps pattern.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: showdown
+  namespace: argocd
+spec:
+  description: gitops-showdown bench
+  sourceRepos:
+    - http://gitea.showdown.local:3000/showdown/gitops-showdown.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: ticketflow
+    - server: https://kubernetes.default.svc
+      namespace: argocd
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: showdown
+  namespace: argocd
+spec:
+  project: showdown
+  source:
+    repoURL: http://gitea.showdown.local:3000/showdown/gitops-showdown.git
+    targetRevision: main
+    path: platform/argocd/apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

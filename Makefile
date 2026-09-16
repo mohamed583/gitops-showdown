@@ -31,6 +31,7 @@ CHART_DIR := $(ROOT_DIR)/apps/ticketflow/chart
 WAIT_TIMEOUT ?= 900s
 
 .PHONY: help versions preflight lint build test venv template smoke \
+        git-server git-server-down bootstrap bootstrap-argocd bootstrap-flux diverge \
         up up-argocd up-flux down down-argocd down-flux \
         status ui-argocd ui-flux
 
@@ -101,17 +102,65 @@ up-flux: preflight ## Create the Flux cluster and install Flux
 	@$(KF) -n $(FLUX_NAMESPACE) wait --for=condition=Available deployment --all --timeout=$(WAIT_TIMEOUT)
 	@echo "==> Flux $(FLUX_VERSION) ready. State: make ui-flux"
 
+##@ GitOps
+
+git-server: ## Start the local Gitea remote and push the repo to it
+	@$(ROOT_DIR)/hack/git-server.sh up
+
+git-server-down: ## Remove the local Gitea remote
+	@$(ROOT_DIR)/hack/git-server.sh down
+
+bootstrap: bootstrap-argocd bootstrap-flux ## Point both engines at the shared Git remote
+	@echo ""
+	@echo "==> both engines are now reconciling from $$($(ROOT_DIR)/hack/git-server.sh url)"
+
+bootstrap-argocd: ## Apply the Argo CD app-of-apps root and let it pull the rest
+	@echo "==> applying the Argo CD root application"
+	@$(KA) apply --server-side --force-conflicts -f $(ROOT_DIR)/platform/argocd/bootstrap.yaml
+	@echo "==> waiting for the ticketflow Application to become Healthy"
+	@$(KA) -n $(ARGOCD_NAMESPACE) wait --for=jsonpath='{.status.health.status}'=Healthy \
+	   application/ticketflow --timeout=$(WAIT_TIMEOUT)
+	@echo "==> Argo CD has converged"
+
+bootstrap-flux: ## Apply the Flux GitRepository + Kustomization and let it pull the rest
+	@echo "==> applying the Flux bootstrap manifest"
+	@$(KF) apply --server-side --force-conflicts -f $(ROOT_DIR)/platform/flux/bootstrap.yaml
+	@echo "==> waiting for the ticketflow HelmRelease to become Ready"
+	@$(KF) -n ticketflow wait --for=condition=Ready helmrelease/ticketflow --timeout=$(WAIT_TIMEOUT)
+	@echo "==> Flux has converged"
+
+diverge: ## Show the divergence: a Helm release exists on one side and not the other
+	@echo "=== Argo CD cluster: helm releases in ticketflow ==="
+	@helm list --kube-context $(CTX_ARGOCD) -n ticketflow 2>/dev/null || true
+	@printf '  helm release secrets: '
+	@$(KA) -n ticketflow get secrets -l owner=helm --no-headers 2>/dev/null | wc -l
+	@echo ""
+	@echo "=== Flux cluster: helm releases in ticketflow ==="
+	@helm list --kube-context $(CTX_FLUX) -n ticketflow 2>/dev/null || true
+	@printf '  helm release secrets: '
+	@$(KF) -n ticketflow get secrets -l owner=helm --no-headers 2>/dev/null | wc -l
+	@echo ""
+	@echo "Same chart, same commit, same application. Flux went through helm-controller"
+	@echo "and left a release you can 'helm history' and 'helm rollback'. Argo CD rendered"
+	@echo "the chart with 'helm template' and applied it itself, so there is nothing for"
+	@echo "Helm to roll back -- undo goes through 'argocd app rollback' over Git history."
+
 ##@ Inspect
 
 status: ## Show the state of both clusters side by side
 	@echo "=== clusters ==============================================="
 	@kind get clusters 2>/dev/null | sed 's/^/  /' || echo "  (none)"
 	@echo ""
+	@echo "=== git remote ============================================="
+	@$(ROOT_DIR)/hack/git-server.sh status
+	@echo ""
 	@echo "=== $(CLUSTER_ARGOCD) / Argo CD $(ARGOCD_VERSION) ==========="
-	@$(KA) -n $(ARGOCD_NAMESPACE) get deployment,statefulset 2>/dev/null || echo "  cluster unreachable -- run: make up-argocd"
+	@$(KA) -n $(ARGOCD_NAMESPACE) get applications 2>/dev/null || echo "  no Applications -- run: make bootstrap-argocd"
+	@$(KA) -n ticketflow get deployment,statefulset 2>/dev/null || echo "  ticketflow not deployed"
 	@echo ""
 	@echo "=== $(CLUSTER_FLUX) / Flux $(FLUX_VERSION) =================="
-	@$(KF) -n $(FLUX_NAMESPACE) get deployment 2>/dev/null || echo "  cluster unreachable -- run: make up-flux"
+	@$(KF) -n ticketflow get helmrelease 2>/dev/null || echo "  no HelmRelease -- run: make bootstrap-flux"
+	@$(KF) -n ticketflow get deployment,statefulset 2>/dev/null || echo "  ticketflow not deployed"
 
 ui-argocd: ## Port-forward the Argo CD web UI and print the admin password
 	@# Refuse to forward onto an occupied port. kubectl port-forward does not

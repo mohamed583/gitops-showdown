@@ -27,13 +27,13 @@ already in it. Right now:
 | ✅ | **ticketflow** — FastAPI + PostgreSQL + Alembic migration, one Helm chart |
 | ✅ | `make smoke` proves the chart end to end with plain Helm, no engine |
 | ✅ | `make preflight` · `make lint` · `make test` gate tooling, YAML, chart and code |
-| ⬜ | The two control planes wired to a shared Git remote (Gitea) |
+| ✅ | **Both engines reconciling the same chart from one local Gitea remote** |
+| ✅ | `make diverge` shows the difference from the live clusters |
 | ⬜ | Demo scenarios, architecture diagram, recording |
 
-`make up` gives you two clusters each running a GitOps engine. The application
-and its chart exist and are verified, but **neither engine is driving them yet** —
-`make smoke` deploys the chart with plain Helm to prove the chart is sound before
-either control plane is wired up. Wiring them up is the next step.
+Both engines now deploy ticketflow from the same commit of the same repository.
+What remains is the presentation layer: scripted demo scenarios, an architecture
+diagram, and a recording.
 
 ---
 
@@ -64,6 +64,14 @@ make build          # build the image, side-load it into both clusters
 make smoke          # install the chart with plain Helm, probe it, remove it
 ```
 
+Wire both engines to a shared Git remote and watch them converge:
+
+```bash
+make git-server     # local Gitea on the kind network, repo pushed to it
+make bootstrap      # point both engines at it; they pull everything else
+make diverge        # the punchline, read from the live clusters
+```
+
 Or one engine at a time:
 
 ```bash
@@ -79,6 +87,24 @@ make ui-flux        # Flux ships no web UI upstream — this is the CLI equivale
 ```
 
 `make help` lists every target.
+
+---
+
+## What the bench actually measured
+
+Same chart, same commit, same application, deployed by both engines:
+
+| | Argo CD 3.5.3 | Flux 2.9.5 |
+|---|---|---|
+| `helm list` in the app namespace | empty | `ticketflow`, revision 1 |
+| Helm release storage Secrets | 0 | 1 |
+| Undo path | `argocd app rollback`, over Git history | `helm rollback`, over Helm history |
+
+And one difference that is not a matter of taste: a migration Job annotated
+`helm.sh/hook: pre-upgrade` installs cleanly under Flux and **deadlocks Argo CD's
+first sync**, because Argo CD maps `pre-upgrade` to `PreSync` and runs it before
+the database it depends on has been created. [ADR 002](docs/adr/002-migration-as-helm-hook.md)
+has the evidence and what it costs to work around.
 
 ---
 
@@ -150,12 +176,16 @@ gitops-showdown/
 │   ├── Dockerfile                    # multi-stage, non-root 65532
 │   └── chart/                        # THE single application definition
 │       └── templates/migration-job.yaml   # the point of divergence
+├── platform/
+│   ├── argocd/                   # AppProject + app-of-apps
+│   └── flux/                     # GitRepository + Kustomization + HelmRelease
+├── hack/git-server.sh            # local Gitea, on the kind network
 ├── docs/adr/                     # architecture decision records
 ├── .yamllint.yaml
 └── SECURITY.md
 ```
 
-`platform/` and `.github/workflows/` arrive with the steps below.
+`.github/workflows/` arrives with the step below.
 
 ---
 
@@ -163,7 +193,7 @@ gitops-showdown/
 
 1. ✅ **Foundation** — Makefile, pinned versions, preflight, both clusters, both engines
 2. ✅ **ticketflow** — FastAPI support-ticket API, PostgreSQL, schema migration Job
-3. ⬜ **Both control planes** driving that chart from a shared local Git remote
+3. ✅ **Both control planes** driving that chart from a shared local Git remote
 4. ⬜ **Demo scenarios**, architecture diagram, recording
 
 The migration Job is the deliberate point of divergence: Flux runs a
@@ -178,7 +208,7 @@ with its own hooks and sync waves, leaving no Helm release at all. See
 
 - [ADR index](docs/adr/README.md) — decisions, with their rejected alternatives
 - [ADR 001](docs/adr/001-argocd-vs-flux.md) — why this comparison, and how it is kept fair
-- [ADR 002](docs/adr/002-migration-as-helm-hook.md) — the migration hook, and the Helm 4 hazard it surfaced
+- [ADR 002](docs/adr/002-migration-as-helm-hook.md) — the migration hook, and why Argo CD forced its phase to change
 - [SECURITY.md](SECURITY.md) — **read before exposing anything**; the bench is deliberately unhardened
 
 ---

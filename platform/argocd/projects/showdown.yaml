@@ -1,0 +1,22 @@
+# Scope for everything this bench deploys. An Application outside these bounds
+# is refused -- the default `default` project allows anything anywhere, which
+# is not a useful thing to demonstrate.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: showdown
+  namespace: argocd
+spec:
+  description: gitops-showdown bench
+  sourceRepos:
+    - http://gitea.showdown.local:3000/showdown/gitops-showdown.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: ticketflow
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

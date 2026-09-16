@@ -71,6 +71,32 @@ postgres:
 # engines. See docs/adr/001-argocd-vs-flux.md.
 migration:
   enabled: true
+  # Which Helm hook phases the migration Job runs in.
+  #
+  # The default is the only value that works on BOTH engines, and the reason is
+  # a real behavioural difference rather than a preference.
+  #
+  # Helm distinguishes an install from an upgrade, so `post-install,pre-upgrade`
+  # is the textbook choice: migrate after the database exists on first install,
+  # and before the new pods roll on every upgrade. Flux runs a real
+  # `helm upgrade`, so it honours exactly that.
+  #
+  # Argo CD has no such distinction. It translates `pre-upgrade` to PreSync and
+  # runs it on EVERY sync, including the very first one -- before PostgreSQL
+  # exists, because PostgreSQL is created in the Sync phase that PreSync blocks.
+  # The result is a deadlock: the namespace contains nothing but the migration
+  # Job, waiting for a database that the sync will never get around to creating.
+  #
+  # `post-install,post-upgrade` maps to PostSync on Argo CD and always runs
+  # after the database exists, on both engines. The cost is real and is stated
+  # plainly: on an upgrade the schema changes AFTER the new pods have rolled,
+  # which is only safe for additive migrations. In production the answer is to
+  # keep the database out of the application's release entirely -- then
+  # `pre-upgrade` is safe on both. See docs/adr/002.
+  #
+  # Set this to "post-install,pre-upgrade" to reproduce the Argo CD deadlock
+  # deliberately; it is the sharpest demonstration in this repository.
+  hook: post-install,post-upgrade
   # Seconds the Job may run before Kubernetes gives up on it.
   activeDeadlineSeconds: 300
   backoffLimit: 2
