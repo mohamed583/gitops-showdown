@@ -9,6 +9,30 @@ comes back.
 
 ## Bring-up
 
+### On Windows, `make` prints `'#' n'est pas reconnu` — or does nothing at all
+
+**Diagnosis.** `make` is being run from PowerShell or cmd, and GNU Make silently
+fell back to `cmd.exe` because it could not resolve `SHELL`. `/usr/bin/env` only
+exists inside an MSYS shell. cmd.exe then tries to execute the `#` comment lines
+inside the recipes, and a target whose recipe is a single `.sh` invocation simply
+produces no output.
+
+**Fix.** Already in the Makefile: on Windows it resolves `SHELL` to Git Bash by
+absolute path. Two details that make this work and are easy to get wrong:
+
+- The path must contain **no spaces**. Make does not quote `SHELL`, so
+  `C:/Program Files/Git/bin/bash.exe` fails even with the space escaped. The 8.3
+  short form `C:/PROGRA~1/Git/bin/bash.exe` is used instead.
+- `C:\Windows\System32ash.exe` is deliberately **not** a candidate. It is the
+  WSL shim, and forwards to a distribution that may have no `/bin/bash` — which
+  fails with `execvpe(/bin/bash) failed` rather than anything obvious.
+
+If you see `No usable bash found`, install Git for Windows.
+
+**Check.** `make -p | grep '^SHELL'` should print a bash, never `cmd.exe`.
+
+---
+
 ### `make up-argocd` fails: `metadata.annotations: Too long: may not be more than 262144 bytes`
 
 **Diagnosis.** Client-side `kubectl apply` stores the entire manifest in a

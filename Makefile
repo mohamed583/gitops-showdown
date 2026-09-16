@@ -3,7 +3,27 @@
 # Every version referenced here comes from hack/versions.env. Nothing in this
 # file hardcodes a version; if you find one, it is a bug.
 
-SHELL       := /usr/bin/env bash
+ifeq ($(OS),Windows_NT)
+# GNU Make silently falls back to cmd.exe whenever SHELL cannot be resolved, and
+# `/usr/bin/env` only resolves inside an MSYS shell. Run `make` from PowerShell
+# and cmd.exe ends up trying to execute the `#` comment lines in these recipes,
+# failing with "'#' n'est pas reconnu" and nothing that points at the cause.
+#
+# Two constraints on the replacement:
+#   * no spaces -- make does not quote SHELL, so "C:/Program Files/..." breaks
+#     even with the space escaped. The 8.3 short form is used instead.
+#   * not C:\Windows\System32\bash.exe -- that is the WSL shim, and it forwards
+#     to a distribution that may have no /bin/bash at all.
+SHELL := $(firstword $(wildcard C:/PROGRA~1/Git/bin/bash.exe \
+                                C:/PROGRA~2/Git/bin/bash.exe \
+                                /usr/bin/bash))
+ifeq ($(SHELL),)
+$(error No usable bash found. Install Git for Windows, or run make from Git Bash)
+endif
+else
+SHELL := /usr/bin/env bash
+endif
+
 .SHELLFLAGS := -euo pipefail -c
 .DEFAULT_GOAL := help
 
