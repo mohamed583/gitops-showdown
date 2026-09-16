@@ -115,14 +115,23 @@ Same chart, same commit, same application, deployed by both engines:
 | Helm release storage Secrets | 0 | 1 |
 | Undo path | `argocd app rollback`, over Git history | `helm rollback`, over Helm history |
 
-Two differences that are not matters of taste. First: a Flux `HelmRelease`
+Three differences that are not matters of taste.
+
+**A failed schema migration is where they stop resembling each other.** Given a
+commit that breaks the migration, Flux ran it, failed, retried three times and
+**rolled back automatically**. Argo CD never ran it at all — a hook-only change
+produces no diff, so automated sync never fires — and reported `Synced` /
+`Healthy` with a failed migration Job sitting in the namespace. The failure
+exists only in `status.operationState`. [Measured in full.](docs/comparison.md#5-failure--where-the-two-engines-stop-resembling-each-other)
+
+Second: a Flux `HelmRelease`
 pointed at a chart living in the same repository **silently ignores your
 commits** until you set `reconcileStrategy: Revision` — the default only rebuilds
 when `Chart.yaml`'s `version` changes. Measured here: same commit on both
 engines, Argo CD serving the new release, Flux still serving the old one twelve
 minutes later.
 
-Second: a migration Job annotated
+Third: a migration Job annotated
 `helm.sh/hook: pre-upgrade` installs cleanly under Flux and **deadlocks Argo CD's
 first sync**, because Argo CD maps `pre-upgrade` to `PreSync` and runs it before
 the database it depends on has been created. [ADR 002](docs/adr/002-migration-as-helm-hook.md)

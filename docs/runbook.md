@@ -135,6 +135,38 @@ kubectl -n ticketflow delete job ticketflow-migrate
 
 ---
 
+### Argo CD says `Synced` and `Healthy`, but the migration never ran
+
+**Diagnosis.** Argo CD excludes hook resources from its live-versus-desired
+diff. A commit whose only change is inside a Helm hook — the migration Job, its
+command, its values — produces no diff, so automated sync never triggers and the
+hook never runs. The Application's synced revision still advances, so it looks
+current.
+
+**The tell.** Sync status and health are not where the truth is:
+
+```bash
+kubectl -n argocd get application ticketflow -o jsonpath='
+  sync={.status.sync.status} health={.status.health.status}
+  operation={.status.operationState.phase} @ {.status.operationState.syncResult.revision}'
+```
+
+A healthy-looking app with `operation=Failed`, or with an operation revision
+behind `sync.revision`, means exactly this.
+
+**Fix.** Force it:
+
+```bash
+argocd app sync ticketflow
+```
+
+**Avoid it.** Do not put anything in a Helm hook that must run on every commit
+when Argo CD drives delivery, and alert on `status.operationState.phase` rather
+than on sync and health. Measured in full in
+[docs/comparison.md](comparison.md#5-failure--where-the-two-engines-stop-resembling-each-other).
+
+---
+
 ### Pods are `ImagePullBackOff` on `ticketflow:0.1.0`
 
 **Diagnosis.** There is no registry. The image is built locally and side-loaded

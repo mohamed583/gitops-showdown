@@ -111,6 +111,45 @@ none is set. The hazard is specific to the Helm CLI's `watcher` strategy.
 Recorded because the reasoning was sound and the conclusion was wrong: the
 escape hatch exists at `.spec.waitStrategy.name` if a future version regresses.
 
+## What the failure path measured, and the cost it revealed
+
+`migration.failOnPurpose=true` makes the migration exit non-zero. Pointing both
+engines at that commit produced the sharpest result in this repository:
+
+- **Flux** ran it, failed the post-upgrade hook, retried three times and
+  **rolled back automatically** to the previous release. `helm history` records
+  the whole cycle.
+- **Argo CD never ran it.** The commit changed only the hook, Argo CD excludes
+  hook resources from its live-versus-desired diff, so `argocd app diff` was
+  empty, automated sync never fired, and the Application reported `Synced` and
+  `Healthy`. Forcing `argocd app sync` ran the hook, which then failed correctly.
+
+And while a failed migration Job sat in the namespace with three errored pods:
+
+```
+sync.status        = Synced
+health.status      = Healthy
+operation.phase    = Failed
+operation.revision = <the previous commit>
+```
+
+**This is the real cost of expressing the migration as a hook.** ADR 001 requires
+both engines to read the same manifest, and a Helm hook is the only construct
+that satisfies that. But under Argo CD, putting the migration in a hook means a
+migration-only commit can be skipped silently while the dashboard stays green --
+and the repaired commit is equally invisible until a sync is forced.
+
+If this repository were a delivery pipeline rather than a bench, the right answer
+under Argo CD would be to stop using a hook: make the migration a normal resource
+whose spec changes per release, so a diff exists and automated sync fires. That
+would mean two different manifests for the two engines, which is precisely what
+ADR 001 forbids. The constraint that makes the comparison fair is the same one
+that produces the bad operational outcome, and it is worth stating that plainly
+rather than presenting the hook as best practice.
+
+Full measurements in [docs/comparison.md](../comparison.md), recovery steps in
+[docs/runbook.md](../runbook.md).
+
 ## Consequences
 
 - The chart cannot use any Argo CD-specific sync behaviour — sync options,

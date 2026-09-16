@@ -52,6 +52,14 @@ inspect() {
   kubectl --context "${CTX_ARGOCD}" -n argocd get application ticketflow \
     -o custom-columns=SYNC:.status.sync.status,HEALTH:.status.health.status,REVISION:.status.sync.revision \
     2>/dev/null | sed 's/^/    /' || echo "    (no Application)"
+  # Read this line, not the one above. A failed PostSync hook leaves the
+  # Application reporting Synced AND Healthy -- the failure lives only in the
+  # last sync OPERATION. Alerting on sync/health alone misses a broken
+  # migration completely.
+  printf '  %slast sync operation -- where a failed hook actually shows%s\n' "${DIM}" "${RESET}"
+  kubectl --context "${CTX_ARGOCD}" -n argocd get application ticketflow \
+    -o jsonpath='    phase={.status.operationState.phase}  {.status.operationState.message}{"\n"}' \
+    2>/dev/null || echo "    (no operation recorded)"
   printf '  %shelm releases -- expected: none, Argo CD never created one%s\n' "${DIM}" "${RESET}"
   helm list --kube-context "${CTX_ARGOCD}" -n ticketflow 2>/dev/null | sed 's/^/    /' || true
   printf '  %sundo path%s\n' "${DIM}" "${RESET}"
@@ -81,7 +89,18 @@ case "${1:-inspect}" in
     log "setting migration.failOnPurpose=true in values-dev.yaml"
     set_flag true
     commit_and_push "demo: break the schema migration on purpose"
-    log "both engines will now try, and fail, to apply this. Give them a minute, then:"
+    echo
+    log "Flux will pick this up within a minute, fail the post-upgrade hook,"
+    echo "    retry, and roll back on its own."
+    echo
+    log "Argo CD will NOT. A commit whose only change is inside a Helm hook"
+    echo "    produces no diff, so automated sync never fires -- it will sit at"
+    echo "    Synced/Healthy having never run the migration. That is the finding,"
+    echo "    not a setup error. To make it run the hook, force it by hand:"
+    echo
+    echo "      argocd app sync ticketflow"
+    echo
+    log "then compare:"
     echo "      hack/demo-failed-migration.sh inspect"
     ;;
   fix)

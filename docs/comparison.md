@@ -98,7 +98,77 @@ If you take one operational thing from this repository, take this one: a Flux
 HelmRelease pointed at a co-located chart will silently ignore your commits
 until you set it.
 
-## 5. Convergence latency — and why the number is almost meaningless
+## 5. Failure — where the two engines stop resembling each other
+
+*Measured*, with `hack/demo-failed-migration.sh`. This is the most consequential
+difference in this document.
+
+One commit sets `migration.failOnPurpose=true`, making the schema migration exit
+non-zero. Both engines are pointed at it. What happened:
+
+| | Argo CD 3.5.3 | Flux 2.9.5 |
+|---|---|---|
+| Noticed the commit | **no** | yes, in seconds |
+| Ran the migration | **no** | yes |
+| Detected the failure | — | yes |
+| Retried | — | 3 attempts |
+| Recovered | — | **rolled back automatically** |
+| Reported | `Synced` / `Healthy` | `Stalled=True RetriesExceeded`, `Remediated=True RollbackSucceeded` |
+
+Flux's account of itself, verbatim:
+
+```
+Released=False  UpgradeFailed: Helm upgrade failed ... post-upgrade hooks failed:
+                failed early due to stalled resources: [Job/ticketflow/ticketflow-migrate status: 'Failed']
+Remediated=True RollbackSucceeded: Helm rollback to previous release ticketflow/ticketflow.v10 succeeded
+```
+
+`helm history` shows the whole cycle — upgrade, fail, roll back, upgrade, fail,
+roll back — as revisions 8 through 12.
+
+### Why Argo CD did nothing
+
+Not a defect, and worth understanding precisely: **Argo CD excludes hook
+resources from its live-versus-desired diff.** The only thing that changed in
+that commit was inside a Helm hook, so `argocd app diff` was empty, the
+Application reported `Synced`, and automated sync never triggered. The migration
+simply never ran.
+
+Forcing `argocd app sync` runs the hook, and it then fails correctly, with
+`Job has reached the specified backoff limit` and the operation marked `Failed`.
+Argo CD handles the failure properly. It just never noticed there was work to do.
+
+### The part that should worry you
+
+While the migration Job sat `Failed` in the namespace with three errored pods:
+
+```
+sync.status        = Synced
+health.status      = Healthy
+operation.phase    = Failed
+operation.revision = <the previous commit>
+```
+
+**An Application can report `Synced` and `Healthy` with a failed migration in its
+namespace.** The failure lives only in `status.operationState`, and the synced
+revision advances past commits that were never actually applied. Alerting on sync
+status and health alone will not catch a broken schema migration.
+
+The same held in reverse: the commit that *repaired* the migration was equally
+invisible, and Argo CD sat at `operation.phase=Failed` against the old revision
+until a sync was forced by hand.
+
+### What to take from it
+
+- If Argo CD drives your delivery, **do not put anything in a Helm hook that must
+  run on every commit**. Use a normal resource whose spec changes, or accept that
+  hook-only changes need an explicit sync.
+- Alert on `status.operationState.phase`, not only on sync and health.
+- Flux's `.spec.upgrade.remediation` is doing real work here, and it is on by
+  default in this bench's HelmRelease. It is the single strongest argument in
+  Flux's favour that this comparison produced.
+
+## 6. Convergence latency — and why the number is almost meaningless
 
 *Measured*, with `hack/demo-converge.sh`, one commit bumping `appVersion`:
 
@@ -119,7 +189,7 @@ The honest conclusion is the boring one: each engine converged on the cadence it
 was told to use. The number is reported here because omitting it would look like
 concealment, and qualified because quoting it bare would be dishonest.
 
-## 6. Values files
+## 7. Values files
 
 Both consume the chart's own per-environment values natively, with no
 duplication and no engine-specific copy of the manifests:
@@ -133,7 +203,7 @@ duplication and no engine-specific copy of the manifests:
 version '0.1.0+1' and merged values files [apps/ticketflow/chart/values.yaml
 apps/ticketflow/chart/values-dev.yaml]`.
 
-## 7. Secrets
+## 8. Secrets
 
 *Sourced, not measured -- this bench does not exercise either path. Reported
 because it is one of the more decision-relevant differences between the two.*
@@ -157,7 +227,7 @@ Neither position is wrong: Flux is more convenient and puts a decryption key
 inside the controller; Argo CD keeps the engine out of the key material and
 pushes the problem to a purpose-built operator. See [ADR 005](adr/005-secrets-management.md).
 
-## 8. Operator surface
+## 9. Operator surface
 
 | | Argo CD 3.5.3 | Flux 2.9.5 |
 |---|---|---|
@@ -170,7 +240,7 @@ pushes the problem to a purpose-built operator. See [ADR 005](adr/005-secrets-ma
 `make ui-argocd` port-forwards the real UI. `make ui-flux` does not pretend an
 equivalent exists: it runs `flux check` and lists the reconciled objects.
 
-## 9. Kubernetes support windows
+## 10. Kubernetes support windows
 
 | | Supported |
 |---|---|
@@ -181,7 +251,7 @@ The intersection is **1.33 – 1.36**. Argo CD sets the ceiling, not Flux — wh
 is why this repository pins `kindest/node:v1.36.4` by digest rather than using
 kind v0.33.0's default of v1.37.
 
-## 10. One thing that is not a difference
+## 11. One thing that is not a difference
 
 Helm 4 replaced the boolean `--wait` with a strategy. Under `watcher` — what
 plain `--wait` selects — the Helm **CLI** never observed the migration hook Job
