@@ -9,6 +9,12 @@ difference you observe is a difference in the engine.
 
 ![architecture](docs/architecture.svg)
 
+> **Terminal recording:** [`hack/demo.tape`](hack/demo.tape) renders it with
+> [VHS](https://github.com/charmbracelet/vhs) (`vhs hack/demo.tape` → `docs/assets/showdown.gif`).
+> The tape validates, but VHS does not produce output on Windows — it reports
+> success and writes no file — so the GIF is not committed rather than faked.
+> Render it on macOS, Linux or WSL.
+
 ---
 
 ## Status — what actually works today
